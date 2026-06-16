@@ -10,6 +10,8 @@ never leave your machine.
 
 ![OFFGRID cover](assets/offgrid-cover.svg)
 
+![OFFGRID live screenshot](assets/offgrid-screenshot.png)
+
 Live demo: https://sourenahashemi-crypto.github.io/OFFGRID/
 GitHub Pages: live and deployed from `main`.
 
@@ -20,8 +22,7 @@ This repository is already set up for GitHub Pages and publishes from `main`.
 If you want to fork or recreate it, the shortest path is still:
 
 1. Keep `index.html` as the app entry point, plus the support files in this repo.
-2. Add a screenshot or short GIF to the README once you have a stable release.
-3. Use the existing workflow in `.github/workflows/pages.yml` as the Pages deploy path.
+2. Use the existing workflow in `.github/workflows/pages.yml` as the Pages deploy path.
 
 Recommended repo files now included:
 
