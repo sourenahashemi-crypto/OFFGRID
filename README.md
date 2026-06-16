@@ -8,6 +8,10 @@ actually mixable.
 Everything runs **100% in your browser**. There is no backend. Your library and your API keys
 never leave your machine.
 
+![OFFGRID cover](assets/offgrid-cover.svg)
+
+Live demo: https://sourenahashemi-crypto.github.io/OFFGRID/
+
 ## GitHub-ready setup
 
 If you are publishing this as a new repository, the shortest path is:
@@ -23,6 +27,7 @@ Recommended repo files now included:
 - `LICENSE` for clear reuse terms.
 - `CONTRIBUTING.md` for issue and PR hygiene.
 - `SECURITY.md` for reporting API-key or browser-storage concerns.
+- `.github/workflows/pages.yml` for automatic GitHub Pages deployment.
 
 ---
 
@@ -104,5 +109,5 @@ Then it filters for DJs: only your **tempo window** (with ½ / ×2 matching) and
 ## Suggested next steps
 
 1. Split `index.html` into `styles.css` and `app.js` if you want the codebase to grow.
-2. Add a small screenshot or demo video to make the GitHub landing page stronger.
-3. Add GitHub Pages or a static host so the full app can be opened without local setup.
+2. Swap the cover SVG for a real screenshot or a short GIF when you have one.
+3. Keep shipping improvements behind the same GitHub Pages URL so the demo stays current.
