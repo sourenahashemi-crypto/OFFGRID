@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OFFGRID — Anti-Algorithm Crate Digging for DJs</title>
+<meta name="description" content="OFFGRID is a 100% browser-based Rekordbox crate digger for DJs. Analyze taste, filter by tempo and Camelot keys, and discover deeper, mixable tracks from different signals than the algorithmic feed." />
+<meta name="theme-color" content="#08090c" />
+<meta property="og:title" content="OFFGRID — Anti-Algorithm Crate Digging for DJs" />
+<meta property="og:description" content="Browser-only Rekordbox analysis and DJ discovery with tempo, Camelot, Last.fm, Discogs, and Claude support." />
+<meta property="og:type" content="website" />
+<style>
+  /* ============================================================
+     OFFGRID — design tokens
+     ============================================================ */
+  :root{
+    --bg:#08090c;
+    --bg-grad:radial-gradient(1200px 700px at 80% -10%, rgba(124,92,255,.16), transparent 60%),
+              radial-gradient(900px 600px at -10% 10%, rgba(0,255,163,.10), transparent 55%),
+              #08090c;
+    --panel:#101116;
+    --panel-2:#16181f;
+    --panel-3:#1d2029;
+    --border:#262a35;
+    --border-soft:#1c1f28;
+    --text:#eceef3;
+    --muted:#9aa0b0;
+    --dim:#666c7d;
+    --accent:#00ffa3;       /* signal green */
+    --accent-2:#ff2e88;     /* hot magenta */
+    --accent-3:#7c5cff;     /* violet */
+    --accent-4:#33b1ff;     /* cyan */
+    --warn:#ffb020;
+    --danger:#ff5a5a;
+    --radius:14px;
+    --radius-sm:9px;
+    --shadow:0 18px 50px -20px rgba(0,0,0,.8);
+    --mono:'SFMono-Regular',ui-monospace,'JetBrains Mono','Roboto Mono',Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:var(--sans);
+    background:var(--bg-grad);
+    color:var(--text);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+    line-height:1.5;
+  }
+  a{color:inherit}
+  button{font-family:inherit;cursor:pointer}
+  ::selection{background:rgba(0,255,163,.25)}
+  ::-webkit-scrollbar{width:11px;height:11px}
+  ::-webkit-scrollbar-thumb{background:#23262f;border-radius:20px;border:3px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#31353f;background-clip:content-box}
+
+  /* ---------- layout ---------- */
+  .wrap{max-width:1180px;margin:0 auto;padding:0 22px}
+  header.top{
+    position:sticky;top:0;z-index:40;
+    backdrop-filter:blur(14px);
+    background:rgba(8,9,12,.72);
+    border-bottom:1px solid var(--border-soft);
+  }
+  .top-inner{display:flex;align-items:center;gap:16px;height:64px}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:.5px;font-size:18px}
+  .brand .dot{width:11px;height:11px;border-radius:50%;background:var(--accent);box-shadow:0 0 14px var(--accent);animation:pulse 2.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .brand small{font-weight:500;color:var(--dim);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;margin-left:2px}
+  .spacer{flex:1}
+  .top-actions{display:flex;align-items:center;gap:10px}
+  .tier-chips{display:flex;gap:6px}
+  .tier-chip{
+    font-size:10.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+    padding:5px 9px;border-radius:7px;border:1px solid var(--border);
+    color:var(--dim);background:var(--panel);display:flex;align-items:center;gap:6px;
+  }
+  .tier-chip .led{width:7px;height:7px;border-radius:50%;background:#39404e}
+  .tier-chip.on{color:var(--text);border-color:rgba(0,255,163,.35)}
+  .tier-chip.on .led{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+
+  .btn{
+    border:1px solid var(--border);background:var(--panel-2);color:var(--text);
+    padding:9px 15px;border-radius:10px;font-weight:600;font-size:13.5px;
+    display:inline-flex;align-items:center;gap:8px;transition:.16s;white-space:nowrap;
+  }
+  .btn:hover{border-color:#3a4150;background:var(--panel-3)}
+  .btn.primary{
+    background:linear-gradient(135deg,var(--accent),#00d98c);color:#04150f;border:none;
+    box-shadow:0 8px 22px -8px rgba(0,255,163,.5);
+  }
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.primary:disabled{opacity:.45;cursor:not-allowed;filter:none;box-shadow:none}
+  .btn.ghost{background:transparent}
+  .btn.icon{padding:9px;width:40px;justify-content:center}
+  .btn.sm{padding:6px 11px;font-size:12px}
+
+  /* ---------- hero / upload ---------- */
+  section.hero{padding:54px 0 30px}
+  .hero h1{font-size:42px;line-height:1.05;margin:0 0 14px;font-weight:800;letter-spacing:-.5px}
+  .hero h1 .grad{background:linear-gradient(120deg,var(--accent),var(--accent-3) 55%,var(--accent-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .hero p.lede{font-size:17px;color:var(--muted);max-width:680px;margin:0 0 26px}
+  .drop{
+    border:1.5px dashed #2f3543;border-radius:18px;background:linear-gradient(180deg,var(--panel),rgba(16,17,22,.4));
+    padding:46px 30px;text-align:center;transition:.2s;cursor:pointer;position:relative;overflow:hidden;
+  }
+  .drop:hover,.drop.drag{border-color:var(--accent);background:linear-gradient(180deg,rgba(0,255,163,.06),rgba(16,17,22,.4))}
+  .drop .ic{font-size:40px;margin-bottom:8px;opacity:.9}
+  .drop h3{margin:6px 0 6px;font-size:19px}
+  .drop p{color:var(--muted);margin:0;font-size:14px}
+  .drop .hint{margin-top:16px;font-size:12.5px;color:var(--dim)}
+  .drop .hint code{background:var(--panel-3);padding:2px 7px;border-radius:6px;font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .feat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:26px}
+  .feat{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px}
+  .feat .t{font-weight:700;font-size:14.5px;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+  .feat .t .num{font-family:var(--mono);font-size:11px;color:var(--accent);border:1px solid rgba(0,255,163,.3);border-radius:6px;padding:1px 6px}
+  .feat p{margin:0;color:var(--muted);font-size:13px}
+  .privacy{margin-top:22px;font-size:12.5px;color:var(--dim);display:flex;align-items:center;gap:8px;justify-content:center}
+  .paste-toggle{text-align:center;margin-top:16px}
+  .paste-toggle a{color:var(--muted);font-size:13px;text-decoration:underline;cursor:pointer}
+  .paste-toggle a:hover{color:var(--text)}
+  .paste-panel{margin-top:14px}
+  textarea.paste{width:100%;min-height:170px;background:var(--panel);border:1px solid var(--border);border-radius:14px;color:var(--text);font-family:var(--mono);font-size:13px;line-height:1.6;padding:15px;resize:vertical}
+  textarea.paste:focus{outline:none;border-color:var(--accent-3)}
+  textarea.paste::placeholder{color:var(--dim)}
+
+  /* ---------- panels / cards ---------- */
+  .grid{display:grid;gap:16px}
+  .card{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px}
+  .card h2{margin:0 0 16px;font-size:13px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:9px}
+  .card h2 .bar{width:3px;height:14px;border-radius:2px;background:var(--accent)}
+
+  /* stat strip */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--border-soft);border:1px solid var(--border-soft);border-radius:var(--radius);overflow:hidden}
+  .stat{background:var(--panel);padding:16px 18px}
+  .stat .v{font-size:26px;font-weight:800;font-family:var(--mono);letter-spacing:-.5px}
+  .stat .v .u{font-size:13px;color:var(--dim);font-weight:600;margin-left:3px}
+  .stat .l{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px;margin-top:3px}
+
+  /* bars */
+  .barlist{display:flex;flex-direction:column;gap:9px}
+  .barrow{display:grid;grid-template-columns:140px 1fr auto;gap:12px;align-items:center;font-size:13px}
+  .barrow .nm{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bartrack{height:9px;background:var(--panel-3);border-radius:6px;overflow:hidden}
+  .barfill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent-3),var(--accent));transition:width .6s cubic-bezier(.2,.7,.2,1)}
+  .barrow .cnt{font-family:var(--mono);font-size:12px;color:var(--dim);min-width:30px;text-align:right}
+
+  /* bpm histogram */
+  .bpmchart{display:flex;align-items:flex-end;gap:3px;height:120px;padding-top:6px}
+  .bpmbar{flex:1;background:var(--panel-3);border-radius:4px 4px 0 0;position:relative;min-height:2px;transition:.4s}
+  .bpmbar.inwin{background:linear-gradient(180deg,var(--accent),var(--accent-3))}
+  .bpmaxis{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:7px}
+  .bpmwin{margin-top:10px;font-size:12.5px;color:var(--muted)}
+  .bpmwin b{color:var(--accent);font-family:var(--mono)}
+
+  /* camelot wheel */
+  .wheelwrap{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+  .wheel{flex-shrink:0}
+  .wheel-seg{cursor:default;transition:.25s}
+  .wheel-seg:hover{filter:brightness(1.25)}
+  .wheel-lbl{font-family:var(--mono);font-size:9px;fill:#cfd3dd;pointer-events:none;font-weight:600}
+  .wheel-legend{font-size:12.5px;color:var(--muted);flex:1;min-width:180px}
+  .wheel-legend .topkeys{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .keychip{font-family:var(--mono);font-weight:700;font-size:12px;padding:4px 9px;border-radius:7px;border:1px solid var(--border)}
+
+  /* chips */
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{
+    font-size:12.5px;padding:5px 11px;border-radius:8px;background:var(--panel-2);
+    border:1px solid var(--border);color:var(--text);display:inline-flex;align-items:center;gap:7px;
+  }
+  .chip .w{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  a.chip:hover{border-color:var(--accent-3);color:#fff}
+
+  /* discovery controls */
+  .controls{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .ctrl{display:flex;flex-direction:column;gap:7px}
+  .ctrl label{font-size:12.5px;color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .ctrl label .val{font-family:var(--mono);color:var(--accent)}
+  input[type=range]{-webkit-appearance:none;height:5px;background:var(--panel-3);border-radius:6px;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 0 4px rgba(0,255,163,.15)}
+  .toggles{display:flex;flex-wrap:wrap;gap:9px}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);background:var(--panel-2);border:1px solid var(--border);padding:8px 12px;border-radius:9px;cursor:pointer;user-select:none}
+  .toggle input{accent-color:var(--accent);width:15px;height:15px}
+  .toggle.on{border-color:rgba(0,255,163,.4)}
+
+  /* results */
+  .res-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .res-head .count{font-family:var(--mono);font-size:13px;color:var(--accent);border:1px solid rgba(0,255,163,.3);padding:3px 9px;border-radius:7px}
+  .res-head select{background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:12.5px;font-family:inherit}
+  .reslist{display:flex;flex-direction:column;gap:9px}
+  .resrow{
+    display:grid;grid-template-columns:30px 1fr auto;gap:14px;align-items:center;
+    background:var(--panel);border:1px solid var(--border-soft);border-radius:11px;padding:13px 15px;transition:.16s;
+  }
+  .resrow:hover{border-color:var(--border);background:var(--panel-2)}
+  .resrow .rank{font-family:var(--mono);font-size:14px;color:var(--dim);font-weight:700;text-align:center}
+  .resrow .main{min-width:0}
+  .resrow .tt{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .resrow .tt .ar{color:var(--accent)}
+  .resrow .meta{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+  .pill{font-size:11px;font-family:var(--mono);padding:3px 8px;border-radius:6px;background:var(--panel-3);color:var(--muted);font-weight:600;white-space:nowrap}
+  .pill.bpm{color:var(--accent-4)}
+  .pill.key{color:#fff}
+  .pill.src{text-transform:uppercase;letter-spacing:.5px;font-size:10px}
+  .pill.src.similar{color:var(--accent)}
+  .pill.src.adjacent{color:var(--accent-3)}
+  .pill.src.lateral{color:var(--accent-2)}
+  .pill.src.label{color:var(--warn)}
+  .resrow .reason{font-size:12.5px;color:var(--muted);margin-top:7px;line-height:1.4}
+  .resrow .match{display:flex;align-items:center;gap:6px;margin-top:7px}
+  .resrow .match .mt{width:80px;height:5px;background:var(--panel-3);border-radius:4px;overflow:hidden}
+  .resrow .match .mf{height:100%;background:linear-gradient(90deg,var(--accent-3),var(--accent))}
+  .resrow .match .mv{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+  .resrow .actions{display:flex;gap:6px}
+  .act{width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:var(--panel-2);display:flex;align-items:center;justify-content:center;font-size:14px;transition:.14s;text-decoration:none}
+  .act:hover{border-color:var(--accent-3);transform:translateY(-1px)}
+  .act.yt:hover{border-color:#ff4d4d;color:#ff6b6b}
+  .act.bp:hover{border-color:var(--accent);color:var(--accent)}
+  .act.lf:hover{border-color:#d51007;color:#ff5a4d}
+
+  .empty{text-align:center;padding:40px 20px;color:var(--dim)}
+  .empty .ic{font-size:34px;margin-bottom:10px}
+
+  /* status / banner */
+  .banner{display:flex;align-items:center;gap:10px;font-size:13px;padding:11px 14px;border-radius:10px;margin-bottom:14px}
+  .banner.info{background:rgba(51,177,255,.08);border:1px solid rgba(51,177,255,.25);color:#bfe3ff}
+  .banner.warn{background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.28);color:#ffe0a8}
+  .banner a{text-decoration:underline;cursor:pointer}
+
+  /* loading */
+  .loading{display:flex;flex-direction:column;align-items:center;gap:14px;padding:36px}
+  .spinner{width:40px;height:40px;border:3px solid var(--panel-3);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading .steps{font-size:13px;color:var(--muted);text-align:center;min-height:20px}
+
+  /* modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(4,5,8,.7);backdrop-filter:blur(4px);z-index:100;display:none;align-items:flex-start;justify-content:center;padding:60px 20px;overflow:auto}
+  .modal-bg.open{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:16px;max-width:560px;width:100%;box-shadow:var(--shadow)}
+  .modal-h{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border-soft)}
+  .modal-h h3{margin:0;font-size:16px}
+  .modal-b{padding:22px;display:flex;flex-direction:column;gap:20px}
+  .field{display:flex;flex-direction:column;gap:7px}
+  .field label{font-size:13px;font-weight:600}
+  .field .desc{font-size:12px;color:var(--dim)}
+  .field .desc a{color:var(--accent-4);text-decoration:underline}
+  .field input,.field select{
+    background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+    border-radius:9px;padding:10px 12px;font-size:13.5px;font-family:var(--mono);width:100%;
+  }
+  .field input:focus,.field select:focus{outline:none;border-color:var(--accent-3)}
+  .field .row{display:flex;gap:9px;align-items:center}
+  .field .row input{flex:1}
+  .keystat{font-size:11.5px;font-family:var(--mono);padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .keystat.ok{color:var(--accent);background:rgba(0,255,163,.1)}
+  .keystat.bad{color:var(--danger);background:rgba(255,90,90,.1)}
+  .keystat.idle{color:var(--dim);background:var(--panel-3)}
+  .modal-f{padding:16px 22px;border-top:1px solid var(--border-soft);display:flex;justify-content:space-between;align-items:center;gap:10px}
+
+  .hide{display:none!important}
+  .fade{animation:fade .4s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--panel-3);border:1px solid var(--border);color:var(--text);padding:11px 18px;border-radius:10px;font-size:13px;z-index:200;box-shadow:var(--shadow);opacity:0;transition:.25s;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+
+  footer{padding:40px 0 60px;text-align:center;color:var(--dim);font-size:12.5px}
+  footer a{color:var(--muted);text-decoration:underline}
+
+  @media(max-width:760px){
+    .hero h1{font-size:31px}
+    .feat-row{grid-template-columns:1fr}
+    .controls{grid-template-columns:1fr}
+    .two-col{grid-template-columns:1fr!important}
+    .resrow{grid-template-columns:24px 1fr;}
+    .resrow .actions{grid-column:2;justify-content:flex-start;margin-top:8px}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-inner">
+    <div class="brand">
+      <span class="dot"></span>OFFGRID
+      <small>anti-algorithm</small>
+    </div>
+    <div class="spacer"></div>
+    <div class="tier-chips" id="tierChips">
+      <span class="tier-chip on" title="Always available — runs fully in your browser"><span class="led"></span>Offline</span>
+      <span class="tier-chip" id="chipLastfm" title="Add a Last.fm key in Settings"><span class="led"></span>Last.fm</span>
+      <span class="tier-chip" id="chipClaude" title="Add an Anthropic key in Settings"><span class="led"></span>Claude</span>
+    </div>
+    <div class="top-actions">
+      <button class="btn ghost sm" id="btnReset" style="display:none">↺ New file</button>
+      <button class="btn icon" id="btnSettings" title="Settings & API keys">⚙</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ HERO / UPLOAD ============ -->
+  <section class="hero" id="hero">
+    <h1>Escape the loop.<br><span class="grad">Dig crates the algorithm hides.</span></h1>
+    <p class="lede">Drop your Rekordbox collection export. OFFGRID reads your taste — genres, BPM window, harmonic keys, the artists you actually rate — then surfaces music from <em>different signals</em> than the platforms feed you. Built for DJs who want deep cuts, not the front page.</p>
+
+    <div class="drop" id="drop">
+      <input type="file" id="fileInput" accept=".xml,.txt" hidden />
+      <div class="ic">⬡</div>
+      <h3>Drop your Rekordbox XML here</h3>
+      <p>or click to browse — your file never leaves this browser</p>
+      <div class="hint">In Rekordbox: <code>File → Export Collection in xml format</code> · no export yet? <a id="loadSample" style="color:var(--accent);text-decoration:underline;cursor:pointer">try a sample library</a></div>
+    </div>
+
+    <div class="paste-toggle"><a id="pasteToggle">⌨  or paste a tracklist as text instead</a></div>
+    <div class="paste-panel hide" id="pastePanel">
+      <textarea class="paste" id="pasteArea" placeholder="Paste one track per line, e.g.
+
+Floating Points - Silhouettes
+Four Tet - Angel Echoes  [120bpm 9A]
+Skee Mask - Via Sub Mids  (140 bpm)
+1. Burial — Archangel
+
+Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header row included) — BPM, Key, Genre and Rating are read automatically."></textarea>
+      <div style="display:flex;gap:12px;margin-top:11px;align-items:center;flex-wrap:wrap">
+        <button class="btn primary" id="btnAnalyzeText">Analyze tracklist</button>
+        <span style="font-size:12px;color:var(--dim)">Format: <code style="font-family:var(--mono);background:var(--panel-3);padding:1px 6px;border-radius:5px">Artist - Track</code> per line · optional <code style="font-family:var(--mono);background:var(--panel-3);padding:1px 6px;border-radius:5px">[128bpm 8A]</code> hints</span>
+      </div>
+    </div>
+
+    <div class="feat-row">
+      <div class="feat">
+        <div class="t"><span class="num">01</span> Orthogonal signals</div>
+        <p>Recommendations come from Last.fm collaborative filtering, label-mate digging and lateral subgenre exploration — trained on different data than your YouTube feed.</p>
+      </div>
+      <div class="feat">
+        <div class="t"><span class="num">02</span> DJ-relevant only</div>
+        <p>Everything is filtered to your tempo window and harmonically-compatible Camelot keys (with half/double-time matching) so picks are actually mixable.</p>
+      </div>
+      <div class="feat">
+        <div class="t"><span class="num">03</span> Deep cuts, not hits</div>
+        <p>Tracks already in your collection are removed, mainstream is down-weighted, and Claude can explain <em>why</em> each pick fits your taste.</p>
+      </div>
+    </div>
+
+    <div class="privacy">🔒 100% client-side · your library and API keys stay on your machine · no servers, no tracking</div>
+  </section>
+
+  <!-- ============ DASHBOARD (hidden until parse) ============ -->
+  <section id="dashboard" class="hide" style="padding-bottom:30px">
+
+    <div id="protocolBanner"></div>
+
+    <!-- stat strip -->
+    <div class="stats" id="statStrip" style="margin-bottom:16px"></div>
+
+    <!-- profile grid -->
+    <div class="grid two-col" style="grid-template-columns:1fr 1fr;margin-bottom:16px">
+      <div class="card">
+        <h2><span class="bar"></span>Genre fingerprint <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dim);font-size:11px;margin-left:auto">rating-weighted</span></h2>
+        <div class="barlist" id="genreBars"></div>
+      </div>
+      <div class="card">
+        <h2><span class="bar"></span>Tempo distribution</h2>
+        <div class="bpmchart" id="bpmChart"></div>
+        <div class="bpmaxis" id="bpmAxis"></div>
+        <div class="bpmwin" id="bpmWin"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h2><span class="bar"></span>Harmonic profile · Camelot wheel</h2>
+      <div class="wheelwrap">
+        <div class="wheel" id="wheel"></div>
+        <div class="wheel-legend">
+          <div>Brighter segments = keys you play most (rating-weighted). Harmonic mixing flows between adjacent segments and across the inner/outer ring at the same number.</div>
+          <div style="margin-top:12px;font-weight:600;color:var(--text);font-size:12px">Your dominant keys</div>
+          <div class="topkeys" id="topKeys"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid two-col" style="grid-template-columns:1fr 1fr;margin-bottom:16px">
+      <div class="card">
+        <h2><span class="bar"></span>Top artists</h2>
+        <div class="chips" id="topArtists"></div>
+      </div>
+      <div class="card">
+        <h2><span class="bar"></span>Top remixers &amp; labels</h2>
+        <div class="chips" id="topRemixers" style="margin-bottom:14px"></div>
+        <div class="chips" id="topLabels"></div>
+      </div>
+    </div>
+
+    <!-- ============ DISCOVERY ============ -->
+    <div class="card" id="discoverCard" style="margin-bottom:16px">
+      <h2><span class="bar" style="background:var(--accent-2)"></span>Discovery engine</h2>
+
+      <div class="controls" style="margin-bottom:18px">
+        <div class="ctrl">
+          <label>BPM tolerance around your window <span class="val" id="bpmTolVal">±6</span></label>
+          <input type="range" id="bpmTol" min="0" max="20" value="6" />
+        </div>
+        <div class="ctrl">
+          <label>How many recommendations <span class="val" id="countVal">25</span></label>
+          <input type="range" id="resCount" min="10" max="50" step="5" value="25" />
+        </div>
+      </div>
+
+      <div class="toggles" style="margin-bottom:18px">
+        <label class="toggle on"><input type="checkbox" id="tgHarmonic" checked> Harmonic keys only</label>
+        <label class="toggle on"><input type="checkbox" id="tgTempo" checked> In tempo window</label>
+        <label class="toggle on"><input type="checkbox" id="tgDouble" checked> Allow ½ / ×2 tempo</label>
+        <label class="toggle"><input type="checkbox" id="tgNewArtists"> New artists only</label>
+        <label class="toggle on"><input type="checkbox" id="tgSimilar" checked> Similar tracks</label>
+        <label class="toggle on"><input type="checkbox" id="tgAdjacent" checked> Adjacent genres</label>
+        <label class="toggle on"><input type="checkbox" id="tgLateral" checked> Lateral / deep cuts</label>
+      </div>
+
+      <button class="btn primary" id="btnDiscover" style="width:100%;justify-content:center;font-size:15px;padding:13px">◈ Find what the algorithm won't show you</button>
+      <div id="engineNote" style="margin-top:12px;font-size:12px;color:var(--dim);text-align:center"></div>
+    </div>
+
+    <!-- results -->
+    <div id="resultsArea"></div>
+
+  </section>
+</main>
+
+<footer>
+  OFFGRID · anti-algorithm crate digging · runs entirely in your browser ·
+  <a id="footAbout">how it works</a>
+</footer>
+
+<!-- ============ SETTINGS MODAL ============ -->
+<div class="modal-bg" id="settingsModal">
+  <div class="modal">
+    <div class="modal-h">
+      <h3>⚙ Settings &amp; API keys</h3>
+      <button class="btn icon ghost" id="closeSettings">✕</button>
+    </div>
+    <div class="modal-b">
+
+      <div class="banner info" style="margin:0">
+        Keys are stored only in <b>this browser's localStorage</b> and sent directly to each service. OFFGRID has no backend. The app works with zero keys — keys just unlock deeper discovery.
+      </div>
+
+      <div class="field">
+        <label>Last.fm API key <span style="color:var(--dim);font-weight:400">— real collaborative-filtering discovery</span></label>
+        <div class="desc">Free, no OAuth. Create one at <a href="https://www.last.fm/api/account/create" target="_blank">last.fm/api/account/create</a> and paste the <b>API key</b> (not the secret).</div>
+        <div class="row">
+          <input type="text" id="keyLastfm" placeholder="32-char API key" spellcheck="false" />
+          <button class="btn sm" id="testLastfm">Test</button>
+          <span class="keystat idle" id="statLastfm">—</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Anthropic API key <span style="color:var(--dim);font-weight:400">— Claude ranking, BPM/key enrichment &amp; explanations</span></label>
+        <div class="desc">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>. Used via direct browser calls (<code style="font-family:var(--mono);font-size:11px">anthropic-dangerous-direct-browser-access</code>). A full discovery run costs roughly a fraction of a cent.</div>
+        <div class="row">
+          <input type="password" id="keyClaude" placeholder="sk-ant-..." spellcheck="false" />
+          <button class="btn sm" id="testClaude">Test</button>
+          <span class="keystat idle" id="statClaude">—</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Claude model</label>
+        <select id="modelSelect">
+          <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced (recommended)</option>
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5 — fastest &amp; cheapest</option>
+          <option value="claude-opus-4-8">Opus 4.8 — deepest reasoning</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Discogs token <span style="color:var(--dim);font-weight:400">— optional, label-mate crate digging</span></label>
+        <div class="desc">Personal token from <a href="https://www.discogs.com/settings/developers" target="_blank">discogs.com/settings/developers</a>. Used to surface other artists on your favourite labels.</div>
+        <div class="row">
+          <input type="text" id="keyDiscogs" placeholder="optional personal token" spellcheck="false" />
+          <span class="keystat idle" id="statDiscogs">optional</span>
+        </div>
+      </div>
+
+    </div>
+    <div class="modal-f">
+      <button class="btn ghost danger" id="clearData" style="color:var(--danger);border-color:rgba(255,90,90,.3)">Clear all keys &amp; data</button>
+      <button class="btn primary" id="saveSettings">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ABOUT MODAL ============ -->
+<div class="modal-bg" id="aboutModal">
+  <div class="modal">
+    <div class="modal-h"><h3>How OFFGRID works</h3><button class="btn icon ghost" id="closeAbout">✕</button></div>
+    <div class="modal-b" style="font-size:13.5px;line-height:1.7;color:var(--muted)">
+      <p style="margin:0"><b style="color:var(--text)">The anti-algorithm idea.</b> Engagement-optimised feeds reinforce what you already play. OFFGRID deliberately sources from <em>orthogonal</em> signals so you escape the bubble:</p>
+      <ul style="margin:4px 0;padding-left:20px">
+        <li><b style="color:var(--text)">Cross-platform collaborative filtering</b> — Last.fm "people who like X also like Y", built on different data than video feeds.</li>
+        <li><b style="color:var(--text)">Label-mate digging</b> — other artists on labels you rate (Discogs, optional).</li>
+        <li><b style="color:var(--text)">Adjacent-subgenre exploration</b> — one step sideways from your core genres.</li>
+        <li><b style="color:var(--text)">Lateral picks</b> — Claude proposes tastemaker deep cuts that pure similarity misses.</li>
+      </ul>
+      <p><b style="color:var(--text)">Then it filters for DJs:</b> only your tempo window (with ½/×2 matching) and harmonically-compatible Camelot keys survive; anything already in your crate is dropped.</p>
+      <p style="margin-bottom:0"><b style="color:var(--text)">Three tiers.</b> Offline (always on): full taste analysis + smart search links. <b>+ Last.fm key:</b> real similar-track discovery with match scores. <b>+ Anthropic key:</b> Claude re-ranks, estimates BPM/key, and writes a one-line reason for every pick — and grounds itself against the real candidate pool to avoid hallucinated tracks.</p>
+    </div>
+    <div class="modal-f" style="justify-content:flex-end">
+      <button class="btn primary" id="closeAbout2">Got it</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================================
+   OFFGRID — Anti-Algorithm Crate Digging for DJs
+   Single-file app. No build step, no backend.
+   ----------------------------------------------------------------------------
+   Pipeline:  Rekordbox XML  ->  taste profile  ->  discovery (3 tiers)
+   ============================================================================ */
+'use strict';
+
+/* ---------------------------------------------------------------------------
+   STATE & PERSISTENCE
+--------------------------------------------------------------------------- */
+const LS = 'offgrid.v1';
+const state = {
+  keys: { lastfm:'', claude:'', discogs:'', model:'claude-sonnet-4-6' },
+  tracks: [],
+  profile: null,
+  results: [],
+  exploreArtists: [],
+};
+function loadKeys(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LS) || '{}');
+    Object.assign(state.keys, s.keys || {});
+  }catch(e){}
+}
+function saveKeys(){
+  try{ localStorage.setItem(LS, JSON.stringify({ keys: state.keys })); }catch(e){}
+}
+
+const $  = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+function reportError(err){
+  const msg = err && err.message ? err.message : String(err);
+  console.error(err);
+  toast(msg);
+}
+
+/* ===========================================================================
+   1. CAMELOT / KEY NORMALISATION
+=========================================================================== */
+const MINOR_MAP = {'G#':'1A','Ab':'1A','D#':'2A','Eb':'2A','A#':'3A','Bb':'3A','F':'4A','C':'5A','G':'6A','D':'7A','A':'8A','E':'9A','B':'10A','F#':'11A','Gb':'11A','C#':'12A','Db':'12A'};
+const MAJOR_MAP = {'B':'1B','F#':'2B','Gb':'2B','C#':'3B','Db':'3B','G#':'4B','Ab':'4B','D#':'5B','Eb':'5B','A#':'6B','Bb':'6B','F':'7B','C':'8B','G':'9B','D':'10B','A':'11B','E':'12B'};
+
+function toCamelot(raw){
+  if(!raw) return null;
+  let s = String(raw).trim().replace(/♯/g,'#').replace(/♭/g,'b');
+  if(!s) return null;
+  // already Camelot? e.g. "8A", "11b"
+  let m = s.match(/^(\d{1,2})\s*([ABab])$/);
+  if(m){ const n=+m[1]; if(n>=1&&n<=12) return n + m[2].toUpperCase(); }
+  // classical, e.g. "Am", "F#m", "Bb", "C"
+  m = s.match(/^([A-Ga-g])([#b]?)\s*(m|min|minor)?$/);
+  if(m){
+    const note = m[1].toUpperCase() + (m[2]||'').toLowerCase();
+    const minor = !!m[3];
+    return (minor ? MINOR_MAP : MAJOR_MAP)[note] || null;
+  }
+  return null;
+}
+function camelotCompat(code){
+  const m = code.match(/^(\d{1,2})([AB])$/); if(!m) return new Set([code]);
+  const n=+m[1], L=m[2], other = L==='A'?'B':'A';
+  const up = (n%12)+1, down = ((n+10)%12)+1;
+  return new Set([code, up+L, down+L, n+other]);
+}
+// hue per Camelot number for the wheel (12 evenly-spaced hues)
+function keyHue(n){ return (n-1)*30; }
+
+/* ===========================================================================
+   2. REKORDBOX XML PARSING
+=========================================================================== */
+function parseRekordbox(xmlText){
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if(doc.querySelector('parsererror')) throw new Error('That file is not valid XML.');
+  const root = doc.querySelector('DJ_PLAYLISTS');
+  const coll = doc.querySelector('COLLECTION');
+  if(!root || !coll) throw new Error('This does not look like a Rekordbox collection export. Use File → Export Collection in xml format.');
+
+  const out = [];
+  const nodes = coll.querySelectorAll('TRACK');
+  nodes.forEach(n => {
+    const a = name => n.getAttribute(name) || '';
+    const ratingRaw = parseInt(a('Rating')) || 0;
+    const tonality = a('Tonality');
+    out.push({
+      id: a('TrackID'),
+      name: a('Name'),
+      artist: a('Artist').trim(),
+      remixer: a('Remixer').trim(),
+      composer: a('Composer').trim(),
+      album: a('Album').trim(),
+      genre: cleanGenre(a('Genre')),
+      genreRaw: a('Genre'),
+      label: a('Label').trim(),
+      bpm: parseFloat(a('AverageBpm')) || 0,
+      key: tonality,
+      camelot: toCamelot(tonality),
+      rating: Math.round(ratingRaw / 51),   // 0..5 stars
+      playCount: parseInt(a('PlayCount')) || 0,
+      year: parseInt(a('Year')) || 0,
+      dateAdded: a('DateAdded'),
+      colour: a('Colour'),
+    });
+  });
+  return out;
+}
+function cleanGenre(g){
+  if(!g) return '';
+  // strip rekordbox sort-prefixes like "_Deep Techno", trim, collapse
+  return g.replace(/^[\s_\-*#>.]+/, '').replace(/\s+/g,' ').trim();
+}
+
+// build a full track object from partial data (used by the text parsers)
+function mkTrack(o){
+  let cam = '';
+  if(o.camelot && /^\d{1,2}[AB]$/.test(o.camelot)) cam = o.camelot;
+  else cam = toCamelot(o.camelot || o.key || '') || '';
+  return {
+    id:o.id||'', name:(o.name||'').trim(), artist:(o.artist||'').trim(), remixer:(o.remixer||'').trim(),
+    composer:'', album:'', genre:cleanGenre(o.genre||''), genreRaw:o.genre||'',
+    label:(o.label||'').trim(), bpm:parseFloat(o.bpm)||0, key:o.key||o.camelot||'', camelot:cam,
+    rating:Math.max(0,Math.min(5,parseInt(o.rating)||0)), playCount:parseInt(o.playCount)||0,
+    year:parseInt(o.year)||0, dateAdded:o.dateAdded||'', colour:'',
+  };
+}
+
+// decode an uploaded file buffer, honouring UTF-16 BOMs (Rekordbox TXT exports are UTF-16)
+function decodeBuffer(buf){
+  const b = new Uint8Array(buf);
+  if(b[0]===0xFF && b[1]===0xFE) return new TextDecoder('utf-16le').decode(buf);
+  if(b[0]===0xFE && b[1]===0xFF) return new TextDecoder('utf-16be').decode(buf);
+  return new TextDecoder('utf-8').decode(buf);
+}
+
+// ----- TEXT / TRACKLIST PARSING -----
+function parseTextList(text){
+  const raw = text.split(/\r?\n/);
+  const nonEmpty = raw.filter(l=>l.trim());
+  const tabbed = raw.filter(l=>l.includes('\t')).length >= Math.max(2, nonEmpty.length*0.5);
+  if(tabbed){
+    try{ const t = parseTabular(raw); if(t.length) return t; }catch(e){}
+  }
+  return parseSimpleList(raw);
+}
+
+// Rekordbox / spreadsheet style: tab-separated with a header row
+function parseTabular(raw){
+  const rows = raw.filter(l=>l.trim().length);
+  if(!rows.length) throw new Error('empty');
+  const header = rows[0].split('\t').map(h=>h.trim().toLowerCase());
+  const find = (...names) => header.findIndex(h => names.some(n => h===n || h.includes(n)));
+  const ci = {
+    artist:find('artist'),
+    name:find('track title','title','track name','song','name','track'),
+    bpm:find('bpm','tempo'),
+    key:find('key','tonality'),
+    genre:find('genre'),
+    rating:find('rating'),
+    label:find('label'),
+    remixer:find('remixer'),
+    play:find('play count','plays'),
+    date:find('date added','added'),
+  };
+  if(ci.artist<0 && ci.name<0) throw new Error('no header');
+  const out=[];
+  for(let i=1;i<rows.length;i++){
+    const c = rows[i].split('\t');
+    const g = idx => (idx>=0 && c[idx]!=null) ? c[idx].trim() : '';
+    const artist=g(ci.artist), name=g(ci.name);
+    if(!artist && !name) continue;
+    let rating=0; const rv=g(ci.rating);
+    if(rv){ if(rv.includes('★')||rv.includes('*')) rating=(rv.match(/[★*]/g)||[]).length;
+            else { const n=parseInt(rv)||0; rating = n>5 ? Math.round(n/51) : n; } }
+    out.push(mkTrack({artist, name, bpm:g(ci.bpm), key:g(ci.key), genre:g(ci.genre),
+      label:g(ci.label), remixer:g(ci.remixer), rating, playCount:parseInt(g(ci.play))||0, dateAdded:g(ci.date)}));
+  }
+  if(!out.length) throw new Error('no rows');
+  return out;
+}
+
+// Simple "Artist - Track" per line, with optional [128bpm 8A] hints
+function parseSimpleList(raw){
+  const out=[];
+  for(let line of raw){
+    line = line.trim();
+    if(!line || /^[-=_*~]{3,}$/.test(line)) continue;
+    line = line.replace(/^\s*\[?\d{1,2}:\d{2}(:\d{2})?\]?\s+/, '');   // leading timestamp
+    line = line.replace(/^\s*\d{1,3}\s*[\.\)\:]\s+/, '');             // "12. " "12) " "12: "
+    if(!line) continue;
+
+    let bpm=0, camelot='';
+    let m = line.match(/(\d{2,3}(?:\.\d+)?)\s*bpm/i);
+    if(m){ bpm=parseFloat(m[1]); line=line.replace(m[0],''); }
+    m = line.match(/[\[\(\s](\d{1,2}[ABab])(?=[\]\)\s]|$)/);          // Camelot token e.g. 8A / 11B
+    if(m){ const cc=toCamelot(m[1]); if(cc){ camelot=cc; line=line.replace(m[1],''); } }
+    if(!bpm){ m = line.match(/[\[\(](\d{2,3})(?:\.\d+)?[\]\)]/); if(m){ const b=+m[1]; if(b>=40&&b<=260){ bpm=b; line=line.replace(m[0],''); } } }
+    line = line.replace(/[\[\(]\s*[\]\)]/g,'').replace(/\s{2,}/g,' ').replace(/[\-–—,]\s*$/,'').trim();
+    if(!line) continue;
+
+    let artist='', name=line;
+    const parts = line.split(/\s+[–—-]\s+/);
+    if(parts.length>=2){ artist=parts[0].trim(); name=parts.slice(1).join(' - ').trim(); }
+    else if(line.includes('\t')){ const tp=line.split('\t').filter(Boolean); if(tp.length>=2){ artist=tp[0].trim(); name=tp.slice(1).join(' ').trim(); } }
+    if(!name) continue;
+    out.push(mkTrack({artist, name, bpm, camelot}));
+  }
+  if(!out.length) throw new Error('Could not find any tracks. Use one "Artist - Track" per line.');
+  return out;
+}
+
+/* ===========================================================================
+   3. TASTE PROFILE
+=========================================================================== */
+function weightedPercentiles(items){ // items: [{v,w}] -> {p25,p50,p75}
+  const arr = items.filter(x=>x.v>0).sort((a,b)=>a.v-b.v);
+  const total = arr.reduce((s,x)=>s+x.w,0);
+  if(!total) return {p25:0,p50:0,p75:0};
+  const at = frac => {
+    const target = total*frac; let cum=0;
+    for(const x of arr){ cum+=x.w; if(cum>=target) return x.v; }
+    return arr[arr.length-1].v;
+  };
+  return { p25:at(.25), p50:at(.5), p75:at(.75) };
+}
+
+function computeProfile(tracks){
+  const now = Date.now();
+  const HALF_LIFE = 730; // days
+  let totalRated=0;
+
+  const genre={}, artist={}, remixer={}, label={}, camelot={};
+  const bpmItems=[];
+  let bpmKnown=0, keyKnown=0;
+  const existingTracks = new Set();
+  const existingArtists = new Set();
+
+  tracks.forEach(t => {
+    // recency
+    let recency = 1;
+    if(t.dateAdded){
+      const dt = Date.parse(t.dateAdded);
+      if(!isNaN(dt)){ const ageDays=(now-dt)/86400000; recency = Math.pow(0.5, Math.max(0,ageDays)/HALF_LIFE); }
+    }
+    const stars = t.rating; if(stars>0) totalRated++;
+    const ratingW = stars>0 ? stars : 0.4;                 // unrated still counts a little
+    const playW   = 1 + 0.25*Math.log1p(t.playCount);
+    const w = ratingW * playW * (0.5 + 0.5*recency);       // recency dampened, not dominant
+
+    if(t.genre){ genre[t.genre]=(genre[t.genre]||0)+w; }
+    if(t.artist){ artist[t.artist]=(artist[t.artist]||0)+w; existingArtists.add(t.artist.toLowerCase()); }
+    if(t.remixer){ remixer[t.remixer]=(remixer[t.remixer]||0)+w; }
+    if(t.label){ label[t.label]=(label[t.label]||0)+w; }
+    if(t.camelot){ camelot[t.camelot]=(camelot[t.camelot]||0)+w; keyKnown++; }
+    if(t.bpm>0){ bpmItems.push({v:t.bpm,w}); bpmKnown++; }
+    if(t.artist && t.name) existingTracks.add((t.artist+' | '+t.name).toLowerCase());
+  });
+
+  const sortObj = (o,n) => Object.entries(o).sort((a,b)=>b[1]-a[1]).slice(0,n).map(([k,v])=>({name:k,w:v}));
+  const bpm = weightedPercentiles(bpmItems);
+  const bpmVals = bpmItems.map(x=>x.v);
+
+  // compatible camelot set from top keys
+  const topCam = sortObj(camelot, 6);
+  const compatSet = new Set();
+  topCam.slice(0,4).forEach(k => camelotCompat(k.name).forEach(c=>compatSet.add(c)));
+
+  // dates
+  const dates = tracks.map(t=>Date.parse(t.dateAdded)).filter(d=>!isNaN(d));
+
+  return {
+    count: tracks.length,
+    rated: totalRated,
+    bpmKnown, keyKnown,
+    genres: sortObj(genre, 14),
+    artists: sortObj(artist, 24),
+    remixers: sortObj(remixer, 12),
+    labels: sortObj(label, 12),
+    camelot,                       // full map
+    topCamelot: topCam,
+    compatSet,
+    bpm,
+    bpmMin: bpmVals.length?Math.min(...bpmVals):0,
+    bpmMax: bpmVals.length?Math.max(...bpmVals):0,
+    bpmMean: bpmVals.length ? Math.round(bpmVals.reduce((a,b)=>a+b,0)/bpmVals.length) : 0,
+    bpmItems,
+    existingTracks, existingArtists,
+    dateRange: dates.length ? [new Date(Math.min(...dates)), new Date(Math.max(...dates))] : null,
+  };
+}
+
+/* ===========================================================================
+   4. RENDER PROFILE / DASHBOARD
+=========================================================================== */
+function fmtDate(d){ return d ? d.toISOString().slice(0,7) : ''; }
+
+function renderDashboard(){
+  const p = state.profile;
+  $('#hero').classList.add('hide');
+  $('#dashboard').classList.remove('hide');
+  $('#dashboard').classList.add('fade');
+  $('#btnReset').style.display='';
+
+  // banners (file:// limits, and sparse-metadata notice for text lists)
+  const pb = $('#protocolBanner');
+  const banners=[];
+  if(location.protocol==='file:'){
+    banners.push(`<div class="banner warn">⚠ You opened this file directly. Browser security may block Last.fm / Claude calls from <code style="font-family:var(--mono)">file://</code>. Offline analysis works fine. For full discovery, run a tiny local server — see the README — then open <b>http://localhost:8000</b>.</div>`);
+  }
+  if(p.bpmKnown===0 && p.keyKnown===0){
+    banners.push(`<div class="banner info">ℹ This list had no BPM/key metadata, so tempo &amp; harmonic analysis are limited — discovery still works via Last.fm/Claude. Add <code style="font-family:var(--mono)">[128bpm 8A]</code> hints per line, or upload the Rekordbox XML for the full picture.</div>`);
+  }
+  pb.innerHTML = banners.join('');
+
+  // stat strip
+  const dr = p.dateRange;
+  $('#statStrip').innerHTML = [
+    ['v', p.count, 'tracks', 'In collection'],
+    ['v', p.rated, '', 'Rated tracks'],
+    ['v', p.bpmMean, '<span class="u">bpm</span>', 'Mean tempo'],
+    ['v', `${Math.round(p.bpm.p25)}–${Math.round(p.bpm.p75)}`, '', 'Tempo window'],
+    ['v', p.genres.length, '', 'Genres'],
+    ['v', p.artists.length+'+', '', 'Artists'],
+    ['v', dr ? fmtDate(dr[0]) : '—', '', 'Crating since'],
+  ].map(([_,v,u,l]) => `<div class="stat"><div class="v">${v}${u||''}</div><div class="l">${l}</div></div>`).join('');
+
+  renderGenreBars(p);
+  renderBpmChart(p);
+  renderWheel(p);
+  renderTopLists(p);
+  updateEngineNote();
+}
+
+function renderGenreBars(p){
+  const max = p.genres.length ? p.genres[0].w : 1;
+  $('#genreBars').innerHTML = p.genres.map(g=>{
+    const pct = Math.max(4, Math.round(g.w/max*100));
+    return `<div class="barrow"><span class="nm" title="${esc(g.name)}">${esc(g.name)}</span>
+      <div class="bartrack"><div class="barfill" style="width:${pct}%"></div></div>
+      <span class="cnt">${pct}%</span></div>`;
+  }).join('') || '<div class="empty">No genre data in this export.</div>';
+}
+
+function renderBpmChart(p){
+  if(!p.bpmItems.length){ $('#bpmChart').innerHTML='<div class="empty" style="width:100%">No BPM data.</div>'; $('#bpmAxis').innerHTML=''; $('#bpmWin').innerHTML=''; return; }
+  const lo = Math.floor(p.bpmMin/4)*4, hi = Math.ceil(p.bpmMax/4)*4;
+  const binW = 4, bins=[];
+  for(let b=lo;b<hi;b+=binW) bins.push({lo:b,hi:b+binW,c:0});
+  p.bpmItems.forEach(it=>{ const i=Math.min(bins.length-1, Math.floor((it.v-lo)/binW)); if(bins[i]) bins[i].c+=it.w; });
+  const maxc = Math.max(...bins.map(b=>b.c),1);
+  const w25=p.bpm.p25, w75=p.bpm.p75;
+  $('#bpmChart').innerHTML = bins.map(b=>{
+    const h=Math.max(2,Math.round(b.c/maxc*100));
+    const inwin = b.hi>w25 && b.lo<w75;
+    return `<div class="bpmbar ${inwin?'inwin':''}" style="height:${h}%" title="${b.lo}–${b.hi} bpm"></div>`;
+  }).join('');
+  $('#bpmAxis').innerHTML = `<span>${lo}</span><span>${Math.round((lo+hi)/2)}</span><span>${hi}</span>`;
+  $('#bpmWin').innerHTML = `Core mixing window <b>${Math.round(w25)}–${Math.round(w75)} BPM</b> · full range ${Math.round(p.bpmMin)}–${Math.round(p.bpmMax)}`;
+}
+
+function renderTopLists(p){
+  const chip = (x,kind) => {
+    const q = encodeURIComponent(x.name);
+    const href = kind==='label'
+      ? `https://www.discogs.com/search/?type=label&q=${q}`
+      : `https://www.youtube.com/results?search_query=${q}`;
+    return `<a class="chip" href="${href}" target="_blank" rel="noopener">${esc(x.name)} <span class="w">${x.w.toFixed(0)}</span></a>`;
+  };
+  $('#topArtists').innerHTML = p.artists.slice(0,18).map(x=>chip(x,'artist')).join('') || '<span class="dim">—</span>';
+  $('#topRemixers').innerHTML = p.remixers.length
+    ? p.remixers.map(x=>chip(x,'artist')).join('')
+    : '<span style="color:var(--dim);font-size:12.5px">No remixer data</span>';
+  $('#topLabels').innerHTML = p.labels.length
+    ? p.labels.map(x=>chip(x,'label')).join('')
+    : '<span style="color:var(--dim);font-size:12.5px">Label field is empty in this export (common) — Discogs enrichment can recover it.</span>';
+}
+
+/* ----- Camelot wheel SVG ----- */
+function polar(cx,cy,r,deg){ const a=(deg-90)*Math.PI/180; return [cx+r*Math.cos(a), cy+r*Math.sin(a)]; }
+function annular(cx,cy,ri,ro,a0,a1){
+  const [x1,y1]=polar(cx,cy,ro,a0),[x2,y2]=polar(cx,cy,ro,a1),[x3,y3]=polar(cx,cy,ri,a1),[x4,y4]=polar(cx,cy,ri,a0);
+  const large=(a1-a0)%360>180?1:0;
+  return `M${x1} ${y1} A${ro} ${ro} 0 ${large} 1 ${x2} ${y2} L${x3} ${y3} A${ri} ${ri} 0 ${large} 0 ${x4} ${y4} Z`;
+}
+function renderWheel(p){
+  const S=300, c=S/2, rOut=140, rMid=98, rIn=56;
+  const maxW = Math.max(...Object.values(p.camelot), 1);
+  let svg = `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">`;
+  for(let n=1;n<=12;n++){
+    const a0=(n-1)*30-15, a1=(n-1)*30+15, mid=(n-1)*30;
+    [['B',rMid,rOut],['A',rIn,rMid]].forEach(([L,ri,ro])=>{
+      const code=n+L, wv=p.camelot[code]||0;
+      const intensity = wv ? 0.18 + 0.82*(wv/maxW) : 0.05;
+      const hue=keyHue(n);
+      const fill = wv ? `hsla(${hue},75%,${30+intensity*28}%,${0.25+intensity*0.7})` : 'rgba(255,255,255,0.03)';
+      const stroke = wv>0.0001 ? `hsla(${hue},80%,60%,${0.3+intensity*0.5})` : 'rgba(255,255,255,0.05)';
+      svg += `<path class="wheel-seg" d="${annular(c,c,ri,ro,a0,a1)}" fill="${fill}" stroke="${stroke}" stroke-width="1"><title>${code} — ${wv?wv.toFixed(0):'0'}</title></path>`;
+      const [lx,ly]=polar(c,c,(ri+ro)/2,mid);
+      svg += `<text class="wheel-lbl" x="${lx}" y="${ly+3}" text-anchor="middle" style="opacity:${wv?1:.35}">${code}</text>`;
+    });
+  }
+  svg += `<circle cx="${c}" cy="${c}" r="${rIn-4}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
+  svg += `<text x="${c}" y="${c-4}" text-anchor="middle" style="fill:var(--dim);font-size:9px;font-family:var(--mono)">CAMELOT</text>`;
+  svg += `<text x="${c}" y="${c+9}" text-anchor="middle" style="fill:var(--muted);font-size:10px;font-family:var(--mono)">${p.keyKnown} keyed</text>`;
+  svg += `</svg>`;
+  $('#wheel').innerHTML = svg;
+
+  $('#topKeys').innerHTML = p.topCamelot.length
+    ? p.topCamelot.map(k=>{const n=+k.name.match(/\d+/)[0];return `<span class="keychip" style="border-color:hsla(${keyHue(n)},70%,55%,.5);color:hsl(${keyHue(n)},70%,72%)">${k.name}</span>`;}).join('')
+    : '<span style="color:var(--dim);font-size:12px">No key data in this export.</span>';
+}
+
+/* ===========================================================================
+   5. DISCOVERY  —  TIER ENGINES
+=========================================================================== */
+
+// ---- genre adjacency for offline / adjacent exploration ----
+const GENRE_ADJ = {
+  'techno':['dub techno','hypnotic techno','peak time techno','hard groove','electro','acid techno'],
+  'deep techno':['dub techno','hypnotic techno','minimal','deep house','ambient techno'],
+  'dub techno':['deep techno','minimal','ambient techno','basic channel'],
+  'minimal':['microhouse','minimal techno','tech house','dub techno'],
+  'minimal techno':['microhouse','dub techno','hypnotic techno','tech house'],
+  'house':['deep house','tech house','disco house','garage house','afro house','soulful house'],
+  'deep house':['lo-fi house','jazzy house','soulful house','afro house','dub techno'],
+  'tech house':['minimal','techno','garage house','bass house','jackin house'],
+  'progressive house':['melodic house','organic house','melodic techno'],
+  'melodic house':['organic house','melodic techno','progressive house','indie dance'],
+  'melodic techno':['melodic house','progressive house','hypnotic techno','organic house'],
+  'organic house':['melodic house','downtempo','balearic','ethno'],
+  'trance':['progressive trance','psytrance','melodic techno','uplifting trance'],
+  'progressive trance':['psytrance','melodic techno','trance'],
+  'psytrance':['progressive trance','goa','full on','forest'],
+  'drum and bass':['liquid dnb','jungle','halftime','breakbeat','neurofunk'],
+  'dnb':['liquid dnb','jungle','halftime','breakbeat','neurofunk'],
+  'jungle':['drum and bass','ragga jungle','breakbeat'],
+  'dubstep':['halftime','grime','bass music','uk garage'],
+  'garage':['uk garage','speed garage','bassline','2-step'],
+  'uk garage':['2-step','speed garage','bassline','future garage'],
+  'disco':['nu-disco','italo disco','cosmic disco','boogie'],
+  'nu-disco':['italo disco','cosmic disco','boogie','funk'],
+  'electro':['electro funk','breakbeat','techno','idm'],
+  'breakbeat':['electro','breaks','big beat','nu skool breaks'],
+  'ambient':['ambient techno','drone','downtempo','idm'],
+  'downtempo':['trip hop','dub','ambient','balearic'],
+  'trip hop':['downtempo','dub','abstract hip hop'],
+  'afro house':['afro tech','amapiano','organic house','tribal house'],
+  'afro tech':['afro house','organic house','melodic techno'],
+  'amapiano':['afro house','afro tech','gqom'],
+  'acid':['acid techno','acid house','electro'],
+  'acid house':['acid techno','chicago house','electro'],
+  'hard techno':['industrial techno','schranz','rave','hardgroove'],
+  'industrial techno':['hard techno','ebm','rave','noise'],
+  'idm':['ambient','electro','breakcore','glitch'],
+  'funk':['boogie','disco','soul','rare groove'],
+  'soul':['funk','rare groove','jazz','disco'],
+};
+function adjacentGenres(profile){
+  const out=new Map();
+  profile.genres.slice(0,6).forEach((g,i)=>{
+    const key=g.name.toLowerCase();
+    const adj = GENRE_ADJ[key] || GENRE_ADJ[Object.keys(GENRE_ADJ).find(k=>key.includes(k)||k.includes(key))] || [];
+    adj.forEach(a=>{ if(!profile.genres.some(x=>x.name.toLowerCase()===a)) out.set(a,(out.get(a)||0)+ (g.w*(1-i*0.1))); });
+  });
+  return Array.from(out.entries()).sort((a,b)=>b[1]-a[1]).map(([name])=>name);
+}
+
+// ---- search-link helpers ----
+const ytSearch = q => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+const bpSearch = q => `https://www.beatport.com/search?q=${encodeURIComponent(q)}`;
+const lfSearch = (ar,tr) => tr
+  ? `https://www.last.fm/music/${encodeURIComponent(ar)}/_/${encodeURIComponent(tr)}`
+  : `https://www.last.fm/music/${encodeURIComponent(ar)}`;
+
+// ---- Last.fm API ----
+async function lfm(method, params){
+  const u = new URL('https://ws.audioscrobbler.com/2.0/');
+  u.searchParams.set('method', method);
+  u.searchParams.set('api_key', state.keys.lastfm);
+  u.searchParams.set('format','json');
+  for(const k in params) if(params[k]!=null) u.searchParams.set(k, params[k]);
+  const r = await fetch(u.toString());
+  const j = await r.json().catch(()=>({}));
+  if(j && j.error) throw new Error('Last.fm: '+(j.message||j.error));
+  if(!r.ok) throw new Error('Last.fm HTTP '+r.status);
+  return j;
+}
+function asArray(x){ return !x ? [] : Array.isArray(x) ? x : [x]; }
+
+async function lastfmCandidates(profile, opts, log){
+  const tracks=[], artistsToExplore=new Map();
+  // seed from top-rated actual tracks
+  const seedTracks = state.tracks
+    .map(t=>({t, w:(t.rating||0)*2 + Math.log1p(t.playCount)}))
+    .filter(x=>x.t.artist && x.t.name)
+    .sort((a,b)=>b.w-a.w).slice(0,6).map(x=>x.t);
+
+  if(opts.similar){
+    for(const s of seedTracks){
+      log(`Last.fm · tracks like “${s.name}”`);
+      try{
+        const j = await lfm('track.getSimilar',{artist:s.artist,track:s.name,limit:10,autocorrect:1});
+        asArray(j.similartracks && j.similartracks.track).forEach(tr=>{
+          tracks.push({artist:tr.artist&&tr.artist.name, track:tr.name, match:parseFloat(tr.match)||0, source:'similar', seed:s.name});
+        });
+      }catch(e){ log('· '+e.message); }
+      await sleep(180);
+    }
+    // similar artists -> explore list
+    const seedArtists = profile.artists.slice(0,6);
+    for(const sa of seedArtists){
+      log(`Last.fm · artists like ${sa.name}`);
+      try{
+        const j = await lfm('artist.getSimilar',{artist:sa.name,limit:8,autocorrect:1});
+        asArray(j.similarartists && j.similarartists.artist).forEach(ar=>{
+          const k=ar.name.toLowerCase();
+          if(!profile.existingArtists.has(k)) artistsToExplore.set(ar.name,(artistsToExplore.get(ar.name)||0)+(parseFloat(ar.match)||0));
+        });
+      }catch(e){ log('· '+e.message); }
+      await sleep(180);
+    }
+  }
+  if(opts.adjacent){
+    const adj = adjacentGenres(profile).slice(0,3);
+    for(const tag of adj){
+      log(`Last.fm · top tracks in “${tag}”`);
+      try{
+        const j = await lfm('tag.getTopTracks',{tag,limit:12});
+        asArray(j.tracks && j.tracks.track).forEach(tr=>{
+          tracks.push({artist:tr.artist&&tr.artist.name, track:tr.name, match:0.5, source:'adjacent', tag});
+        });
+      }catch(e){ log('· '+e.message); }
+      await sleep(180);
+    }
+  }
+  state.exploreArtists = Array.from(artistsToExplore.entries()).sort((a,b)=>b[1]-a[1]).slice(0,16).map(([name,m])=>({name,match:m}));
+  return tracks;
+}
+
+// ---- Discogs label-mate (optional) ----
+async function discogsLabelMates(profile, log){
+  if(!state.keys.discogs || !profile.labels.length) return [];
+  const out=[];
+  for(const lab of profile.labels.slice(0,3)){
+    log(`Discogs · roster of ${lab.name}`);
+    try{
+      const s = await fetch(`https://api.discogs.com/database/search?type=label&q=${encodeURIComponent(lab.name)}&token=${state.keys.discogs}&per_page=1`,
+        {headers:{'User-Agent':'OFFGRID/1.0'}}).then(r=>r.json());
+      const id = s.results && s.results[0] && s.results[0].id;
+      if(!id) continue;
+      const rel = await fetch(`https://api.discogs.com/labels/${id}/releases?per_page=25&sort=year&sort_order=desc&token=${state.keys.discogs}`,
+        {headers:{'User-Agent':'OFFGRID/1.0'}}).then(r=>r.json());
+      asArray(rel.releases).forEach(rl=>{
+        if(rl.artist && rl.title){ out.push({artist:rl.artist.replace(/\s*\(\d+\)$/,''), track:rl.title, match:0.55, source:'label', label:lab.name}); }
+      });
+      await sleep(900);
+    }catch(e){ log('· '+e.message); }
+  }
+  return out;
+}
+
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+function dedupeCandidates(list, profile, opts){
+  const seen=new Set(), out=[];
+  for(const c of list){
+    if(!c.artist || !c.track) continue;
+    const key=(c.artist+' | '+c.track).toLowerCase();
+    if(seen.has(key)) continue; seen.add(key);
+    if(profile.existingTracks.has(key)) continue;                       // novelty: drop owned
+    if(opts.newArtists && profile.existingArtists.has(c.artist.toLowerCase())) continue;
+    out.push(c);
+  }
+  // prefer higher match
+  return out.sort((a,b)=>(b.match||0)-(a.match||0));
+}
+
+// ---- Claude ----
+async function claudeCall(system, user, maxTokens){
+  const r = await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'content-type':'application/json',
+      'x-api-key':state.keys.claude,
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true',
+    },
+    body:JSON.stringify({
+      model:state.keys.model||'claude-sonnet-4-6',
+      max_tokens:maxTokens||3000,
+      system,
+      messages:[{role:'user',content:user}],
+    }),
+  });
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error('Claude: '+((j.error&&j.error.message)||('HTTP '+r.status)));
+  return (j.content||[]).map(b=>b.text||'').join('');
+}
+function extractJSON(text){
+  let t = text.trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) t=fence[1].trim();
+  const s=t.indexOf('['), e=t.lastIndexOf(']');
+  if(s>=0 && e>s){ try{ return JSON.parse(t.slice(s,e+1)); }catch(err){} }
+  const so=t.indexOf('{'), eo=t.lastIndexOf('}');
+  if(so>=0 && eo>so){ try{ const o=JSON.parse(t.slice(so,eo+1)); return o.recommendations||o.results||o.tracks||[]; }catch(err){} }
+  throw new Error('Claude returned unparseable output.');
+}
+
+function profileForLLM(p){
+  return {
+    topGenres: p.genres.slice(0,8).map(g=>g.name),
+    adjacentGenres: adjacentGenres(p).slice(0,6),
+    tempoWindow: [Math.round(p.bpm.p25), Math.round(p.bpm.p75)],
+    tempoFullRange: [Math.round(p.bpmMin), Math.round(p.bpmMax)],
+    dominantKeys: p.topCamelot.map(k=>k.name),
+    topArtists: p.artists.slice(0,15).map(a=>a.name),
+    topRemixers: p.remixers.slice(0,8).map(a=>a.name),
+    topLabels: p.labels.slice(0,8).map(l=>l.name),
+  };
+}
+
+async function claudeRank(profile, pool, opts, log){
+  const want = opts.count;
+  const sys = `You are a world-class DJ and crate-digging A&R with encyclopedic knowledge of electronic and dance music across eras and scenes. You help DJs ESCAPE algorithmic feeds by recommending deep, mixable, non-obvious tracks. You never recommend tracks the DJ already owns or by their listed top artists unless truly exceptional. You ground recommendations in real, findable releases and you reason explicitly about tempo and harmonic (Camelot) mixability. Return STRICT JSON only — no prose, no markdown.`;
+
+  const poolText = pool.length
+    ? `Here is a candidate pool gathered from Last.fm collaborative filtering and adjacent-genre charts (artist | track | source | match 0..1):\n` +
+      pool.slice(0,70).map(c=>`- ${c.artist} | ${c.track} | ${c.source} | ${(c.match||0).toFixed(2)}`).join('\n')
+    : `No external candidate pool is available — propose tracks from your own knowledge of real releases.`;
+
+  const user = `<dj_profile>\n${JSON.stringify(profileForLLM(profile),null,2)}\n</dj_profile>\n\n<candidate_pool>\n${poolText}\n</candidate_pool>\n\n<instructions>\nSelect and/or propose the ${want} best DJ recommendations that this DJ likely does NOT know but would love.\nRules:\n1. Prefer tracks from the candidate pool when they fit; you may ADD up to ${Math.ceil(want*0.35)} lateral picks from your own knowledge (mark source "lateral") — genuinely off the beaten path, escaping the obvious algorithm.\n2. Stay within or close to the tempo window ${JSON.stringify([Math.round(profile.bpm.p25),Math.round(profile.bpm.p75)])} BPM (half/double-time is fine — note it).\n3. Favor harmonic compatibility with the dominant keys ${JSON.stringify(profile.topCamelot.map(k=>k.name))}.\n4. Do NOT recommend the DJ's top artists or tracks they likely own. Favor deep cuts over obvious hits.\n5. For EVERY pick give your best estimate of bpm (number) and camelot key (e.g. "8A"). If unsure, estimate from genre conventions and say so briefly.\n6. Keep reasons to ONE punchy sentence tying the pick to their taste.\n</instructions>\n\nReturn STRICT JSON array, each item: {"artist":string,"track":string,"bpm":number,"camelot":string,"subgenre":string,"source":"similar"|"adjacent"|"lateral"|"label","reason":string,"confidence":0..1}. No other text.`;
+
+  log('Claude · ranking & enriching candidates…');
+  const out = await claudeCall(sys, user, 4000);
+  return extractJSON(out).map(r=>({
+    artist:r.artist, track:r.track,
+    bpm:Number(r.bpm)||0, camelot:(r.camelot||'').toUpperCase(),
+    subgenre:r.subgenre||'', source:r.source||'lateral',
+    reason:r.reason||'', match:typeof r.confidence==='number'?r.confidence:0.7,
+  })).filter(r=>r.artist&&r.track);
+}
+
+// ---- offline tier: smart starting-point links ----
+function offlineSuggestions(profile, opts){
+  const out=[];
+  const lo=Math.round(profile.bpm.p25), hi=Math.round(profile.bpm.p75);
+  // adjacent genres at tempo
+  if(opts.adjacent) adjacentGenres(profile).slice(0,8).forEach((g,i)=>{
+    out.push({artist:'', track:`${g}`, bpm:Math.round(profile.bpm.p50), camelot:'', subgenre:g, source:'adjacent',
+      reason:`Adjacent to your core sound — search this subgenre in your ${lo}–${hi} BPM pocket.`, match:0.7-i*0.03,
+      query:`${g} ${lo}-${hi}bpm`});
+  });
+  // "more like" your top artists
+  if(opts.similar) profile.artists.slice(0,12).forEach((a,i)=>{
+    out.push({artist:'', track:`artists like ${a.name}`, bpm:0, camelot:'', subgenre:'', source:'similar',
+      reason:`One of your most-rated artists — dig their labels, remixers and B-sides.`, match:0.68-i*0.02,
+      query:`${a.name} mix`, beatportQuery:a.name});
+  });
+  return out.slice(0, opts.count);
+}
+
+/* ---- orchestrator ---- */
+async function runDiscovery(){
+  const p = state.profile; if(!p) return;
+  const opts = readOpts();
+  const area = $('#resultsArea');
+  const btn = $('#btnDiscover'); btn.disabled=true; btn.textContent='◌ Digging…';
+  const logs=[];
+  const log = m => { logs.push(m); $('#discLog') && ($('#discLog').textContent=m); };
+
+  area.innerHTML = `<div class="card"><div class="loading"><div class="spinner"></div><div class="steps" id="discLog">Starting…</div></div></div>`;
+
+  try{
+    let pool=[];
+    if(state.keys.lastfm){
+      log('Querying Last.fm…');
+      pool = pool.concat(await lastfmCandidates(p, opts, log));
+      if(state.keys.discogs) pool = pool.concat(await discogsLabelMates(p, log));
+    }
+    pool = dedupeCandidates(pool, p, opts);
+
+    let results;
+    if(state.keys.claude){
+      results = await claudeRank(p, pool, opts, log);
+    } else if(pool.length){
+      // Last.fm only — present grounded candidates (BPM/key unknown)
+      results = pool.slice(0, opts.count).map(c=>({
+        artist:c.artist, track:c.track, bpm:0, camelot:'',
+        subgenre:c.tag||c.label||'', source:c.source,
+        reason: c.source==='similar' ? `Listeners of ${c.seed?('“'+c.seed+'”'):'your tracks'} also play this — different signal than your video feed.`
+              : c.source==='adjacent' ? `Top track in “${c.tag}”, one step sideways from your core genres.`
+              : c.label ? `On ${c.label}, a label you rate — classic crate digging.` : `Collaborative-filtering match.`,
+        match:c.match||0.5,
+      }));
+    } else {
+      results = offlineSuggestions(p, opts);
+    }
+
+    // hard filters
+    results = applyFilters(results, p, opts);
+    state.results = results;
+    renderResults(results, p, opts, logs);
+  }catch(e){
+    area.innerHTML = `<div class="card"><div class="banner warn" style="margin:0">⚠ ${esc(e.message)}<br><span style="font-size:12px;color:var(--dim)">If this is a CORS/network error and you opened the file directly, run a local server (see README) and retry.</span></div></div>`;
+  }finally{
+    btn.disabled=false; btn.innerHTML='◈ Find what the algorithm won\'t show you';
+  }
+}
+
+function readOpts(){
+  return {
+    bpmTol:+$('#bpmTol').value,
+    count:+$('#resCount').value,
+    harmonic:$('#tgHarmonic').checked,
+    tempo:$('#tgTempo').checked,
+    halfDouble:$('#tgDouble').checked,
+    newArtists:$('#tgNewArtists').checked,
+    similar:$('#tgSimilar').checked,
+    adjacent:$('#tgAdjacent').checked,
+    lateral:$('#tgLateral').checked,
+  };
+}
+
+function bpmInWindow(bpm, p, opts){
+  if(!bpm) return true;                                  // unknown bpm passes (Last.fm tier)
+  const lo=p.bpm.p25-opts.bpmTol, hi=p.bpm.p75+opts.bpmTol;
+  const test = b => b>=lo && b<=hi;
+  if(test(bpm)) return true;
+  if(opts.halfDouble && (test(bpm*2)||test(bpm/2))) return true;
+  return false;
+}
+function keyCompatible(cam, p){
+  if(!cam || !/^\d{1,2}[AB]$/.test(cam)) return true;     // unknown key passes
+  return p.compatSet.has(cam);
+}
+function applyFilters(results, p, opts){
+  return results.filter(r=>{
+    if(opts.lateral===false && r.source==='lateral') return false;
+    if(opts.similar===false && r.source==='similar') return false;
+    if(opts.adjacent===false && r.source==='adjacent') return false;
+    if(opts.tempo && !bpmInWindow(r.bpm,p,opts)) return false;
+    if(opts.harmonic && !keyCompatible(r.camelot,p)) return false;
+    if(opts.newArtists && r.artist && p.existingArtists.has(r.artist.toLowerCase())) return false;
+    return true;
+  }).slice(0, opts.count);
+}
+
+/* ===========================================================================
+   6. RENDER RESULTS
+=========================================================================== */
+function renderResults(results, p, opts, logs){
+  const area=$('#resultsArea');
+  const tier = state.keys.claude ? 'Claude + '+(state.keys.lastfm?'Last.fm':'knowledge')
+             : state.keys.lastfm ? 'Last.fm collaborative filtering'
+             : 'Offline starting points';
+
+  let explore='';
+  if(state.exploreArtists.length){
+    explore = `<div class="card" style="margin-bottom:16px"><h2><span class="bar" style="background:var(--accent-3)"></span>Artists to explore <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dim);font-size:11px;margin-left:auto">via Last.fm similarity</span></h2>
+      <div class="chips">${state.exploreArtists.map(a=>`<a class="chip" href="${ytSearch(a.name)}" target="_blank" rel="noopener">${esc(a.name)} <span class="w">${Math.round((a.match||0)*100)}</span></a>`).join('')}</div></div>`;
+  }
+
+  if(!results.length){
+    area.innerHTML = explore + `<div class="card"><div class="empty"><div class="ic">🜸</div>No picks survived your filters. Loosen "Harmonic only" / "In tempo window", raise BPM tolerance, or add a key in Settings for deeper results.</div></div>`;
+    return;
+  }
+
+  const rows = results.map((r,i)=>{
+    const yt = ytSearch(r.query || ((r.artist?r.artist+' ':'')+r.track));
+    const bp = bpSearch(r.beatportQuery || (r.artist?r.artist+' '+r.track:r.track));
+    const lf = r.artist ? lfSearch(r.artist, r.query?'':r.track) : '';
+    const camN = (r.camelot.match&&r.camelot.match(/\d+/)) ? +r.camelot.match(/\d+/)[0] : 0;
+    const title = r.artist ? `<span class="ar">${esc(r.artist)}</span> — ${esc(r.track)}` : esc(r.track);
+    const pills = [
+      r.bpm ? `<span class="pill bpm">${Math.round(r.bpm)} BPM</span>`:'',
+      r.camelot && /^\d/.test(r.camelot) ? `<span class="pill key" style="color:hsl(${keyHue(camN)},70%,72%)">${esc(r.camelot)}</span>`:'',
+      r.subgenre ? `<span class="pill">${esc(r.subgenre)}</span>`:'',
+      `<span class="pill src ${r.source}">${esc(r.source)}</span>`,
+    ].join('');
+    const mpct=Math.round((r.match||0)*100);
+    return `<div class="resrow">
+      <div class="rank">${i+1}</div>
+      <div class="main">
+        <div class="tt">${title}</div>
+        <div class="meta">${pills}</div>
+        ${r.reason?`<div class="reason">${esc(r.reason)}</div>`:''}
+        <div class="match"><div class="mt"><div class="mf" style="width:${mpct}%"></div></div><span class="mv">${mpct}% fit</span></div>
+      </div>
+      <div class="actions">
+        <a class="act yt" href="${yt}" target="_blank" rel="noopener" title="YouTube search">▶</a>
+        <a class="act bp" href="${bp}" target="_blank" rel="noopener" title="Beatport search">◈</a>
+        ${lf?`<a class="act lf" href="${lf}" target="_blank" rel="noopener" title="Last.fm">♪</a>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  area.innerHTML = explore + `<div class="card fade">
+    <div class="res-head">
+      <h2 style="margin:0"><span class="bar" style="background:var(--accent-2)"></span>Recommendations</h2>
+      <span class="count">${results.length}</span>
+      <span style="font-size:12px;color:var(--dim)">via ${esc(tier)}</span>
+      <div style="flex:1"></div>
+      <select id="sortSel">
+        <option value="fit">Sort: best fit</option>
+        <option value="bpm">Sort: BPM</option>
+        <option value="src">Sort: source</option>
+      </select>
+      <button class="btn sm" id="btnCopy">⧉ Copy</button>
+      <button class="btn sm" id="btnCsv">↓ CSV</button>
+    </div>
+    <div class="reslist" id="reslist">${rows}</div>
+  </div>`;
+
+  $('#sortSel').onchange = e=>{
+    const v=e.target.value; let s=[...results];
+    if(v==='bpm') s.sort((a,b)=>(b.bpm||0)-(a.bpm||0));
+    else if(v==='src') s.sort((a,b)=>a.source.localeCompare(b.source));
+    else s.sort((a,b)=>(b.match||0)-(a.match||0));
+    state.results=s; renderResults(s,p,opts,logs);
+  };
+  $('#btnCopy').onclick = ()=>{
+    const txt = results.map((r,i)=>`${i+1}. ${r.artist?r.artist+' — ':''}${r.track}${r.bpm?` [${Math.round(r.bpm)}bpm`:''}${r.camelot&&/^\d/.test(r.camelot)?(r.bpm?' ':' [')+r.camelot+']':r.bpm?']':''}`).join('\n');
+    navigator.clipboard.writeText(txt).then(()=>toast('Crate list copied'));
+  };
+  $('#btnCsv').onclick = ()=>downloadCSV(results);
+}
+
+function downloadCSV(results){
+  const head='rank,artist,track,bpm,camelot,subgenre,source,fit,reason\n';
+  const body=results.map((r,i)=>[i+1,r.artist,r.track,r.bpm||'',r.camelot||'',r.subgenre||'',r.source,Math.round((r.match||0)*100),(r.reason||'').replace(/"/g,"'")]
+    .map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob([head+body],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='offgrid-crate.csv'; a.click();
+  toast('CSV downloaded');
+}
+
+/* ===========================================================================
+   7. ENGINE STATUS / TIER CHIPS
+=========================================================================== */
+function updateTierChips(){
+  $('#chipLastfm').classList.toggle('on', !!state.keys.lastfm);
+  $('#chipClaude').classList.toggle('on', !!state.keys.claude);
+}
+function updateEngineNote(){
+  const n=$('#engineNote'); if(!n) return;
+  if(state.keys.claude && state.keys.lastfm) n.textContent='Full power: Last.fm discovery + Claude ranking, BPM/key enrichment & reasons.';
+  else if(state.keys.claude) n.textContent='Claude is generating grounded deep-cut picks from your profile. Add a Last.fm key for real collaborative-filtering candidates.';
+  else if(state.keys.lastfm) n.textContent='Last.fm collaborative filtering active. Add an Anthropic key for BPM/key enrichment & one-line reasons.';
+  else n.textContent='Offline mode: smart starting-point links. Add a Last.fm and/or Anthropic key in ⚙ Settings to unlock real discovery.';
+}
+
+/* ===========================================================================
+   8. WIRING
+=========================================================================== */
+function ingestText(text){
+  const isXml = /<DJ_PLAYLISTS/i.test(text) || /^﻿?\s*<\?xml/i.test(text);
+  const tracks = isXml ? parseRekordbox(text) : parseTextList(text);
+  if(!tracks.length) throw new Error('No tracks found.');
+  state.tracks = tracks;
+  state.profile = computeProfile(tracks);
+  state.exploreArtists=[]; state.results=[];
+  renderDashboard();
+  toast(`Loaded ${tracks.length} tracks`);
+}
+function handleFile(file){
+  if(!file) return;
+  const rd=new FileReader();
+  rd.onload = e=>{ try{ ingestText(decodeBuffer(e.target.result)); }catch(err){ reportError(err); } };
+  rd.onerror = ()=>toast('Could not read file');
+  rd.readAsArrayBuffer(file);
+}
+function analyzePastedText(){
+  const v = $('#pasteArea').value;
+  if(!v.trim()){ toast('Paste a tracklist first'); return; }
+  try{ ingestText(v); }catch(err){ reportError(err); }
+}
+
+function buildSampleXML(){
+  // a small, varied electronic sample so users can try without their own export
+  const T=[
+    ['Piknik','Riva Starr','','Deep Techno',119,'4A',5,12,'Snatch! Records','2023-04-01'],
+    ['Spastik','Plastikman','','Techno',128,'5A',5,40,'Plus 8','2019-10-24'],
+    ['Gerudo Valley','Skee Mask','','Breakbeat',140,'9A',4,8,'Ilian Tape','2024-01-15'],
+    ['At Les','Carl Craig','','Detroit Techno',124,'8A',5,30,'Planet E','2020-06-12'],
+    ['Acid Eiffel','Choice','','Acid','125','3A',4,5,'Fragile','2022-09-09'],
+    ['Windowlicker','Aphex Twin','','IDM',96,'6B',5,22,'Warp','2018-03-03'],
+    ['Glue','Bicep','','Melodic House',122,'11A',5,55,'Ninja Tune','2024-05-20'],
+    ['Untitled','DJ Sprinkles','','Deep House',120,'2A',4,7,'Mule Musiq','2021-11-11'],
+    ['Dub','Burial','','Dubstep',138,'7A',5,18,'Hyperdub','2023-02-02'],
+    ['Strings of Life','Derrick May','Rhythim is Rhythim','Detroit Techno',122,'8A',5,33,'Transmat','2019-07-07'],
+    ['Voyage','Mathew Jonson','','Minimal',127,'1A',4,9,'Wagon Repair','2022-12-01'],
+    ['Sueno Latino','Sueno Latino','Derrick May','Balearic',120,'10B',3,4,'DFC','2020-01-20'],
+    ['Belfast','Orbital','','Ambient Techno',118,'12A',5,15,'ffrr','2023-08-08'],
+    ['LFO','LFO','','Bleep Techno',126,'4A',4,11,'Warp','2021-03-30'],
+    ['Energy Flash','Joey Beltram','','Techno',130,'5A',5,21,'R&S','2019-05-05'],
+    ['Xtal','Aphex Twin','','Ambient',100,'9B',4,6,'Warp','2018-04-04'],
+    ['Pacific State','808 State','','Acid House',118,'3A',4,9,'ZTT','2022-06-15'],
+    ['Knights of the Jaguar','DJ Rolando','','Detroit Techno',132,'5A',5,28,'Underground Resistance','2020-10-10'],
+  ];
+  const xa = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let x='<?xml version="1.0" encoding="UTF-8"?>\n<DJ_PLAYLISTS Version="1.0.0">\n<PRODUCT Name="rekordbox" Version="6.0.0" Company="AlphaTheta"/>\n<COLLECTION Entries="'+T.length+'">\n';
+  T.forEach((t,i)=>{
+    x+=`<TRACK TrackID="${1000+i}" Name="${xa(t[0])}" Artist="${xa(t[1])}" Remixer="${xa(t[2])}" Genre="${xa(t[3])}" AverageBpm="${(+t[4]).toFixed(2)}" Tonality="${xa(t[5])}" Rating="${t[6]*51}" PlayCount="${t[7]}" Label="${xa(t[8])}" DateAdded="${t[9]}" Kind="MP3 File" Year="2010"/>\n`;
+  });
+  x+='</COLLECTION>\n<PLAYLISTS></PLAYLISTS>\n</DJ_PLAYLISTS>';
+  return x;
+}
+
+// ---- key testing ----
+async function testLastfm(){
+  const s=$('#statLastfm'); state.keys.lastfm=$('#keyLastfm').value.trim();
+  if(!state.keys.lastfm){ s.className='keystat idle'; s.textContent='—'; return; }
+  s.className='keystat idle'; s.textContent='testing…';
+  try{ await lfm('artist.getSimilar',{artist:'Aphex Twin',limit:1,autocorrect:1}); s.className='keystat ok'; s.textContent='✓ valid'; }
+  catch(e){ s.className='keystat bad'; s.textContent='✗ '+e.message.slice(0,28); }
+}
+async function testClaude(){
+  const s=$('#statClaude'); state.keys.claude=$('#keyClaude').value.trim(); state.keys.model=$('#modelSelect').value;
+  if(!state.keys.claude){ s.className='keystat idle'; s.textContent='—'; return; }
+  s.className='keystat idle'; s.textContent='testing…';
+  try{ await claudeCall('Reply with OK.','Say OK',16); s.className='keystat ok'; s.textContent='✓ valid'; }
+  catch(e){ s.className='keystat bad'; s.textContent='✗ '+e.message.slice(0,30); }
+}
+
+function openSettings(){
+  $('#keyLastfm').value=state.keys.lastfm;
+  $('#keyClaude').value=state.keys.claude;
+  $('#keyDiscogs').value=state.keys.discogs;
+  $('#modelSelect').value=state.keys.model||'claude-sonnet-4-6';
+  $('#settingsModal').classList.add('open');
+}
+function saveSettings(){
+  state.keys.lastfm=$('#keyLastfm').value.trim();
+  state.keys.claude=$('#keyClaude').value.trim();
+  state.keys.discogs=$('#keyDiscogs').value.trim();
+  state.keys.model=$('#modelSelect').value;
+  saveKeys(); updateTierChips(); updateEngineNote();
+  $('#settingsModal').classList.remove('open');
+  toast('Settings saved');
+}
+
+function wire(){
+  // upload
+  const drop=$('#drop'), fi=$('#fileInput');
+  drop.onclick=()=>fi.click();
+  fi.onchange=e=>handleFile(e.target.files[0]);
+  ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+  drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) handleFile(f); });
+  $('#loadSample').onclick=e=>{ e.stopPropagation(); const b=new File([buildSampleXML()],'sample.xml',{type:'application/xml'}); handleFile(b); };
+  $('#pasteToggle').onclick=()=>{ const p=$('#pastePanel'); p.classList.toggle('hide'); if(!p.classList.contains('hide')) $('#pasteArea').focus(); };
+  $('#btnAnalyzeText').onclick=analyzePastedText;
+
+  // sliders
+  $('#bpmTol').oninput=e=>$('#bpmTolVal').textContent='±'+e.target.value;
+  $('#resCount').oninput=e=>$('#countVal').textContent=e.target.value;
+  $$('.toggle input').forEach(cb=>cb.onchange=()=>cb.closest('.toggle').classList.toggle('on',cb.checked));
+
+  // discovery
+  $('#btnDiscover').onclick=runDiscovery;
+  $('#btnReset').onclick=()=>{ state.tracks=[];state.profile=null; $('#dashboard').classList.add('hide'); $('#hero').classList.remove('hide'); $('#btnReset').style.display='none'; $('#resultsArea').innerHTML=''; $('#fileInput').value=''; };
+
+  // settings modal
+  $('#btnSettings').onclick=openSettings;
+  $('#closeSettings').onclick=()=>$('#settingsModal').classList.remove('open');
+  $('#saveSettings').onclick=saveSettings;
+  $('#testLastfm').onclick=testLastfm;
+  $('#testClaude').onclick=testClaude;
+  $('#clearData').onclick=()=>{ if(confirm('Remove all stored API keys from this browser?')){ localStorage.removeItem(LS); state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6'}; updateTierChips(); updateEngineNote(); $('#settingsModal').classList.remove('open'); toast('Cleared'); } };
+  $('#settingsModal').addEventListener('click',e=>{ if(e.target.id==='settingsModal') $('#settingsModal').classList.remove('open'); });
+
+  // about
+  const openAbout=()=>$('#aboutModal').classList.add('open');
+  $('#footAbout').onclick=openAbout;
+  $('#closeAbout').onclick=$('#closeAbout2').onclick=()=>$('#aboutModal').classList.remove('open');
+  $('#aboutModal').addEventListener('click',e=>{ if(e.target.id==='aboutModal') $('#aboutModal').classList.remove('open'); });
+
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ $('#settingsModal').classList.remove('open'); $('#aboutModal').classList.remove('open'); } });
+}
+
+/* ---- boot ---- */
+loadKeys();
+updateTierChips();
+wire();
+</script>
+</body>
+</html>
