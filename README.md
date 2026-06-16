@@ -11,15 +11,17 @@ never leave your machine.
 ![OFFGRID cover](assets/offgrid-cover.svg)
 
 Live demo: https://sourenahashemi-crypto.github.io/OFFGRID/
+GitHub Pages: live and deployed from `main`.
 
-## GitHub-ready setup
+## Repository
 
-If you are publishing this as a new repository, the shortest path is:
+This repository is already set up for GitHub Pages and publishes from `main`.
 
-1. Create a new GitHub repo named `offgrid` or similar.
-2. Initialize this folder as git, connect the remote, and push `main`.
-3. Keep `index.html` as the app entry point, plus the support files in this repo.
-4. Add a screenshot or short GIF to the README once you have a stable release.
+If you want to fork or recreate it, the shortest path is still:
+
+1. Keep `index.html` as the app entry point, plus the support files in this repo.
+2. Add a screenshot or short GIF to the README once you have a stable release.
+3. Use the existing workflow in `.github/workflows/pages.yml` as the Pages deploy path.
 
 Recommended repo files now included:
 
@@ -28,16 +30,6 @@ Recommended repo files now included:
 - `CONTRIBUTING.md` for issue and PR hygiene.
 - `SECURITY.md` for reporting API-key or browser-storage concerns.
 - `.github/workflows/pages.yml` for automatic GitHub Pages deployment.
-
-## GitHub Pages note
-
-The Pages workflow can only create the site automatically if you add a repository secret named `PAGES_TOKEN`.
-
-Use a personal access token with the `repo` scope or Pages write permission, then add it in:
-
-`Settings → Secrets and variables → Actions → New repository secret`
-
-Without that secret, GitHub Pages creation falls back to a 404 from the API and the workflow fails.
 
 ---
 
