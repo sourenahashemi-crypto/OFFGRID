@@ -1,5 +1,7 @@
 # OFFGRID — Anti-Algorithm Crate Digging for DJs
 
+[![Deploy GitHub Pages](https://github.com/sourenahashemi-crypto/OFFGRID/actions/workflows/pages.yml/badge.svg?branch=main)](https://github.com/sourenahashemi-crypto/OFFGRID/actions/workflows/pages.yml)
+
 Drop your **Rekordbox collection export** and OFFGRID builds a taste profile (genres, tempo
 window, harmonic keys, top artists/labels), then surfaces music from **different signals** than
 the platforms feed you — so you escape the algorithmic loop and find real deep cuts that are
