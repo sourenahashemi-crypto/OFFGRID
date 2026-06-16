@@ -29,6 +29,16 @@ Recommended repo files now included:
 - `SECURITY.md` for reporting API-key or browser-storage concerns.
 - `.github/workflows/pages.yml` for automatic GitHub Pages deployment.
 
+## GitHub Pages note
+
+The Pages workflow can only create the site automatically if you add a repository secret named `PAGES_TOKEN`.
+
+Use a personal access token with the `repo` scope or Pages write permission, then add it in:
+
+`Settings → Secrets and variables → Actions → New repository secret`
+
+Without that secret, GitHub Pages creation falls back to a 404 from the API and the workflow fails.
+
 ---
 
 ## Quick start
