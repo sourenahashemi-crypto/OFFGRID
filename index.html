@@ -187,6 +187,18 @@
   .toggle input{accent-color:var(--accent);width:15px;height:15px}
   .toggle.on{border-color:rgba(0,255,163,.4)}
 
+  /* taste pockets + anchor input */
+  .pocketbox{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+  .pocketbox .pocket-h{flex-basis:100%;font-size:12px;color:var(--muted);margin:0 0 2px}
+  .pocket{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer;transition:.15s}
+  .pocket:hover{border-color:#3a4150}
+  .pocket.on{border-color:var(--accent);background:rgba(0,255,163,.07)}
+  .pocket b{font-size:13px;font-weight:600}
+  .pocket span{font-size:10.5px;color:var(--dim);font-family:var(--mono)}
+  textarea.anchor{width:100%;background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 12px;font-size:13px;font-family:var(--mono);resize:vertical;line-height:1.5}
+  textarea.anchor:focus{outline:none;border-color:var(--accent-3)}
+  textarea.anchor::placeholder{color:var(--dim)}
+
   /* results */
   .res-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
   .res-head .count{font-family:var(--mono);font-size:13px;color:var(--accent);border:1px solid rgba(0,255,163,.3);padding:3px 9px;border-radius:7px}
@@ -400,18 +412,29 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
     <div class="card" id="discoverCard" style="margin-bottom:16px">
       <h2><span class="bar" style="background:var(--accent-2)"></span>Discovery engine</h2>
 
-      <div class="controls" style="margin-bottom:18px">
+      <div id="pocketBox" class="pocketbox"></div>
+
+      <div class="ctrl" style="margin-bottom:16px">
+        <label>Tracks you love (anchors) — optional, 1–5 lines <span style="color:var(--dim);font-weight:400">·  most accurate signal</span></label>
+        <textarea id="anchorSeeds" class="anchor" rows="2" placeholder="Artist - Track per line — the bullseye of your taste (especially the obscure ones you already found)"></textarea>
+      </div>
+
+      <div class="controls" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px">
         <div class="ctrl">
-          <label>BPM tolerance around your window <span class="val" id="bpmTolVal">±6</span></label>
+          <label>BPM tolerance <span class="val" id="bpmTolVal">±6</span></label>
           <input type="range" id="bpmTol" min="0" max="20" value="6" />
         </div>
         <div class="ctrl">
-          <label>How many recommendations <span class="val" id="countVal">25</span></label>
+          <label>How many <span class="val" id="countVal">25</span></label>
           <input type="range" id="resCount" min="10" max="50" step="5" value="25" />
+        </div>
+        <div class="ctrl">
+          <label>Obscurity — skip the obvious <span class="val" id="obscVal">40</span></label>
+          <input type="range" id="obscurity" min="0" max="100" step="10" value="40" />
         </div>
       </div>
 
-      <div class="toggles" style="margin-bottom:18px">
+      <div class="toggles" style="margin-bottom:16px">
         <label class="toggle on"><input type="checkbox" id="tgHarmonic" checked> Harmonic keys only</label>
         <label class="toggle on"><input type="checkbox" id="tgTempo" checked> In tempo window</label>
         <label class="toggle on"><input type="checkbox" id="tgDouble" checked> Allow ½ / ×2 tempo</label>
@@ -419,6 +442,7 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
         <label class="toggle on"><input type="checkbox" id="tgSimilar" checked> Similar tracks</label>
         <label class="toggle on"><input type="checkbox" id="tgAdjacent" checked> Adjacent genres</label>
         <label class="toggle on"><input type="checkbox" id="tgLateral" checked> Lateral / deep cuts</label>
+        <label class="toggle"><input type="checkbox" id="tgClaude"> ✦ Use Claude (rank + reasons)</label>
       </div>
 
       <button class="btn primary" id="btnDiscover" style="width:100%;justify-content:center;font-size:15px;padding:13px">◈ Find what the algorithm won't show you</button>
@@ -537,6 +561,8 @@ const state = {
   profile: null,
   results: [],
   exploreArtists: [],
+  selectedPockets: new Set(),   // taste-pocket focus (empty = whole library)
+  lastPoolSize: 0,
 };
 function loadKeys(){
   try{
@@ -813,6 +839,7 @@ function computeProfile(tracks){
     bpmItems,
     existingTracks, existingArtists,
     dateRange: dates.length ? [new Date(Math.min(...dates)), new Date(Math.max(...dates))] : null,
+    pockets: detectPockets(tracks),
   };
 }
 
@@ -855,6 +882,7 @@ function renderDashboard(){
   renderBpmChart(p);
   renderWheel(p);
   renderTopLists(p);
+  renderPockets(p);
   updateEngineNote();
 }
 
@@ -943,6 +971,9 @@ function renderWheel(p){
 
 // ---- genre adjacency for offline / adjacent exploration ----
 const GENRE_ADJ = {
+  'melodic house & techno':['melodic techno','organic house','progressive house','indie dance','afro house','hypnotic techno'],
+  'indie dance / nu-disco':['nu-disco','melodic house','organic house','italo disco','leftfield'],
+  'indie dance':['nu-disco','melodic house','organic house','italo disco','leftfield'],
   'techno':['dub techno','hypnotic techno','peak time techno','hard groove','electro','acid techno'],
   'deep techno':['dub techno','hypnotic techno','minimal','deep house','ambient techno'],
   'dub techno':['deep techno','minimal','ambient techno','basic channel'],
@@ -992,6 +1023,103 @@ function adjacentGenres(profile){
   return Array.from(out.entries()).sort((a,b)=>b[1]-a[1]).map(([name])=>name);
 }
 
+// ---- taste-pocket detection (free, local) ----
+// Map a raw genre string to a coarse "family" so we can split a library into taste pockets.
+const GENRE_FAMILY = [
+  [/melodic/,                                  'Melodic House & Techno'],
+  [/indie ?dance|nu.?disco/,                   'Indie Dance / Nu-Disco'],
+  [/tech house/,                               'Tech House'],
+  [/progressive/,                              'Progressive House'],
+  [/organic|downtempo|ethno/,                  'Organic / Downtempo'],
+  [/afro/,                                     'Afro House'],
+  [/minimal|deep tech/,                        'Minimal / Deep Tech'],
+  [/trance/,                                   'Trance'],
+  [/peak time|driving|raw|hard techno|techno/, 'Techno'],
+  [/deep house/,                               'Deep House'],
+  [/house/,                                    'House'],
+  [/electro/,                                  'Electro'],
+];
+function familyOf(genre){
+  const g = (genre||'').toLowerCase();
+  for(const [re,name] of GENRE_FAMILY) if(re.test(g)) return name;
+  return genre || '';
+}
+function detectPockets(tracks){
+  const fam = {};
+  tracks.forEach(t=>{
+    let key = familyOf(t.genre);
+    if(!key){ key = t.bpm>0 ? ('~'+(Math.round(t.bpm/4)*4)+' BPM') : 'Uncategorized'; }
+    (fam[key] = fam[key] || []).push(t);
+  });
+  const minSize = Math.max(3, Math.round(tracks.length*0.02));
+  return Object.entries(fam).map(([name,ts])=>{
+    const w = weightedPercentiles(ts.filter(t=>t.bpm>0).map(t=>({v:t.bpm,w:1})));
+    const cam={}, art={};
+    ts.forEach(t=>{ if(t.camelot) cam[t.camelot]=(cam[t.camelot]||0)+1;
+                    if(t.artist) art[t.artist]=(art[t.artist]||0)+((t.rating||1)); });
+    return {
+      name, size:ts.length,
+      bpm:[Math.round(w.p25)||0, Math.round(w.p75)||0],
+      keys:Object.entries(cam).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]),
+      artists:Object.entries(art).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]),
+    };
+  }).filter(p=>p.size>=minSize).sort((a,b)=>b.size-a.size);
+}
+function renderPockets(p){
+  const box = $('#pocketBox'); if(!box) return;
+  const ps = p.pockets || [];
+  if(ps.length < 2){ box.innerHTML=''; box.style.display='none'; return; }
+  box.style.display='';
+  box.innerHTML = `<div class="pocket-h">Your taste pockets — tap to focus discovery (none selected = whole library)</div>` +
+    ps.map(pk=>{
+      const on = state.selectedPockets.has(pk.name);
+      const sub = `${pk.size} trk · ${pk.bpm[0]&&pk.bpm[1]?pk.bpm[0]+'–'+pk.bpm[1]:'—'}${pk.artists.length?' · '+esc(pk.artists.slice(0,2).join(', ')):''}`;
+      return `<button type="button" class="pocket ${on?'on':''}" data-pk="${esc(pk.name)}"><b>${esc(pk.name)}</b><span>${sub}</span></button>`;
+    }).join('');
+  box.querySelectorAll('.pocket').forEach(b=>b.onclick=()=>{
+    const n=b.getAttribute('data-pk');
+    if(state.selectedPockets.has(n)) state.selectedPockets.delete(n); else state.selectedPockets.add(n);
+    b.classList.toggle('on'); updateEngineNote();
+  });
+}
+
+// big mainstream names to skip when "obscurity" is high (don't waste tokens on the obvious)
+const MEGA = new Set(['anyma','artbat','tale of us','adriatique','kevin de vries','agents of time','massano',
+  'mind against','camelphat','argy','vintage culture','swedish house mafia','solomun','boris brejcha','black coffee',
+  'peggy gou','charlotte de witte','amelie lens','ben böhmer','ben bohmer','lane 8','keinemusik','adam beyer',
+  'layton giordani','eli brown','bart skils','david guetta','calvin harris','martin garrix','afterlife','cassian',
+  'yotto','colyn','fideles','rüfüs du sol','rufus du sol','innellea','stephan bodzin','tinlicker','marsh','meduza',
+  'fisher','john summit','hot since 82','tale of us','miss monique']);
+
+function parseAnchors(){
+  const el = $('#anchorSeeds'); const v = el ? el.value.trim() : '';
+  if(!v) return [];
+  return v.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).slice(0,5).map(s=>{
+    const m = s.split(/\s+[-–—]\s+/);
+    return m.length>=2 ? {artist:m[0].trim(), track:m.slice(1).join(' - ').trim()} : {artist:s, track:''};
+  });
+}
+
+// hard, FREE local filtering of the candidate pool BEFORE any LLM call (token thrift)
+function qualifyPool(list, p, opts){
+  let pool = dedupeCandidates(list, p, opts);          // dedupe + drop owned + newArtists
+  if(opts.obscurity>=60) pool = pool.filter(c=>!MEGA.has((c.artist||'').toLowerCase()));
+  if(opts.obscurity>0){                                // drop the most-popular fraction by Last.fm playcount
+    const withPop = pool.filter(c=>c.popularity>0).sort((a,b)=>a.popularity-b.popularity);
+    if(withPop.length>5){
+      const cut = Math.max(1, Math.floor(withPop.length*(1-opts.obscurity/100)));
+      const keep = new Set(withPop.slice(0,cut));
+      pool = pool.filter(c=> !(c.popularity>0) || keep.has(c));
+    }
+  }
+  pool = pool.filter(c=>{                              // DJ-relevance when bpm/key are known on the candidate
+    if(opts.tempo && c.bpm && !bpmInWindow(c.bpm,p,opts)) return false;
+    if(opts.harmonic && c.camelot && !keyCompatible(c.camelot,p,opts)) return false;
+    return true;
+  });
+  return pool;
+}
+
 // ---- search-link helpers ----
 const ytSearch = q => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
 const bpSearch = q => `https://www.beatport.com/search?q=${encodeURIComponent(q)}`;
@@ -999,28 +1127,42 @@ const lfSearch = (ar,tr) => tr
   ? `https://www.last.fm/music/${encodeURIComponent(ar)}/_/${encodeURIComponent(tr)}`
   : `https://www.last.fm/music/${encodeURIComponent(ar)}`;
 
-// ---- Last.fm API ----
+// ---- Last.fm API (with 7-day localStorage cache → re-runs cost no calls) ----
+function lfmCacheGet(k){
+  try{ const o=JSON.parse(localStorage.getItem('offgrid.lfm.'+k)||'null'); if(o && Date.now()-o.t < 6048e5) return o.v; }catch(e){}
+  return null;
+}
+function lfmCacheSet(k,v){ try{ localStorage.setItem('offgrid.lfm.'+k, JSON.stringify({t:Date.now(),v})); }catch(e){} }
 async function lfm(method, params){
   const u = new URL('https://ws.audioscrobbler.com/2.0/');
   u.searchParams.set('method', method);
   u.searchParams.set('api_key', state.keys.lastfm);
   u.searchParams.set('format','json');
   for(const k in params) if(params[k]!=null) u.searchParams.set(k, params[k]);
+  const ck = method+'|'+JSON.stringify(params||{});
+  const hit = lfmCacheGet(ck); if(hit) return hit;
   const r = await fetch(u.toString());
   const j = await r.json().catch(()=>({}));
   if(j && j.error) throw new Error('Last.fm: '+(j.message||j.error));
   if(!r.ok) throw new Error('Last.fm HTTP '+r.status);
+  lfmCacheSet(ck, j);
   return j;
 }
 function asArray(x){ return !x ? [] : Array.isArray(x) ? x : [x]; }
 
 async function lastfmCandidates(profile, opts, log){
   const tracks=[], artistsToExplore=new Map();
-  // seed from top-rated actual tracks
-  const seedTracks = state.tracks
+  const fam = opts.pocketFamilies;                 // Set of family names, or undefined = whole library
+  // seed from top-rated actual tracks, focused on the selected pocket(s)
+  let seedTracks = state.tracks
     .map(t=>({t, w:(t.rating||0)*2 + Math.log1p(t.playCount)}))
     .filter(x=>x.t.artist && x.t.name)
+    .filter(x=> !fam || fam.has(familyOf(x.t.genre)))
     .sort((a,b)=>b.w-a.w).slice(0,6).map(x=>x.t);
+  // user-supplied anchor tracks take priority as seeds (the bullseye of their taste)
+  const anchors = opts.anchors || [];
+  const anchorSeeds = anchors.filter(a=>a.track).map(a=>({artist:a.artist, name:a.track, _anchor:true}));
+  seedTracks = anchorSeeds.concat(seedTracks).slice(0,8);
 
   if(opts.similar){
     for(const s of seedTracks){
@@ -1028,23 +1170,25 @@ async function lastfmCandidates(profile, opts, log){
       try{
         const j = await lfm('track.getSimilar',{artist:s.artist,track:s.name,limit:10,autocorrect:1});
         asArray(j.similartracks && j.similartracks.track).forEach(tr=>{
-          tracks.push({artist:tr.artist&&tr.artist.name, track:tr.name, match:parseFloat(tr.match)||0, source:'similar', seed:s.name});
+          tracks.push({artist:tr.artist&&tr.artist.name, track:tr.name, match:(parseFloat(tr.match)||0)+(s._anchor?0.25:0), source:'similar', seed:s.name, popularity:parseInt(tr.playcount)||0});
         });
       }catch(e){ log('· '+e.message); }
-      await sleep(180);
+      await sleep(150);
     }
-    // similar artists -> explore list
-    const seedArtists = profile.artists.slice(0,6);
+    // similar artists -> explore list (anchor artists first, then top profile artists)
+    const seedArtists = anchors.filter(a=>!a.track).map(a=>({name:a.artist}))
+      .concat(profile.artists.slice(0,6)).slice(0,7);
     for(const sa of seedArtists){
       log(`Last.fm · artists like ${sa.name}`);
       try{
         const j = await lfm('artist.getSimilar',{artist:sa.name,limit:8,autocorrect:1});
         asArray(j.similarartists && j.similarartists.artist).forEach(ar=>{
           const k=ar.name.toLowerCase();
-          if(!profile.existingArtists.has(k)) artistsToExplore.set(ar.name,(artistsToExplore.get(ar.name)||0)+(parseFloat(ar.match)||0));
+          if(!profile.existingArtists.has(k) && !(opts.obscurity>=60 && MEGA.has(k)))
+            artistsToExplore.set(ar.name,(artistsToExplore.get(ar.name)||0)+(parseFloat(ar.match)||0));
         });
       }catch(e){ log('· '+e.message); }
-      await sleep(180);
+      await sleep(150);
     }
   }
   if(opts.adjacent){
@@ -1054,7 +1198,7 @@ async function lastfmCandidates(profile, opts, log){
       try{
         const j = await lfm('tag.getTopTracks',{tag,limit:12});
         asArray(j.tracks && j.tracks.track).forEach(tr=>{
-          tracks.push({artist:tr.artist&&tr.artist.name, track:tr.name, match:0.5, source:'adjacent', tag});
+          tracks.push({artist:tr.artist&&tr.artist.name, track:tr.name, match:0.5, source:'adjacent', tag, popularity:parseInt(tr.playcount)||0});
         });
       }catch(e){ log('· '+e.message); }
       await sleep(180);
@@ -1148,17 +1292,22 @@ function profileForLLM(p){
 
 async function claudeRank(profile, pool, opts, log){
   const want = opts.count;
-  const sys = `You are a world-class DJ and crate-digging A&R with encyclopedic knowledge of electronic and dance music across eras and scenes. You help DJs ESCAPE algorithmic feeds by recommending deep, mixable, non-obvious tracks. You never recommend tracks the DJ already owns or by their listed top artists unless truly exceptional. You ground recommendations in real, findable releases and you reason explicitly about tempo and harmonic (Camelot) mixability. Return STRICT JSON only — no prose, no markdown.`;
+  const pocketNote = opts.pocketFamilies && opts.pocketFamilies.size
+    ? `The DJ is focusing on these taste pockets right now: ${[...opts.pocketFamilies].join(', ')}. Stay inside that lane.` : '';
+  const sys = `You are a world-class DJ and crate-digging A&R with encyclopedic knowledge of electronic and dance music. You help DJs ESCAPE algorithmic feeds by recommending deep, mixable, NON-OBVIOUS tracks from smaller/newer artists. You NEVER recommend mainstream chart names or the DJ's existing artists. You ground picks in real, findable releases and reason about tempo + harmonic (Camelot) mixability. Return STRICT JSON only — no prose, no markdown.`;
 
   const poolText = pool.length
-    ? `Here is a candidate pool gathered from Last.fm collaborative filtering and adjacent-genre charts (artist | track | source | match 0..1):\n` +
-      pool.slice(0,70).map(c=>`- ${c.artist} | ${c.track} | ${c.source} | ${(c.match||0).toFixed(2)}`).join('\n')
-    : `No external candidate pool is available — propose tracks from your own knowledge of real releases.`;
+    ? `Candidate pool from Last.fm collaborative filtering + adjacent-genre charts, already filtered for novelty/obscurity (artist | track | source | match 0..1):\n` +
+      pool.slice(0,35).map(c=>`- ${c.artist} | ${c.track} | ${c.source} | ${(c.match||0).toFixed(2)}`).join('\n')
+    : `No external candidate pool — propose tracks from your own knowledge of real, lesser-known releases.`;
 
-  const user = `<dj_profile>\n${JSON.stringify(profileForLLM(profile),null,2)}\n</dj_profile>\n\n<candidate_pool>\n${poolText}\n</candidate_pool>\n\n<instructions>\nSelect and/or propose the ${want} best DJ recommendations that this DJ likely does NOT know but would love.\nRules:\n1. Prefer tracks from the candidate pool when they fit; you may ADD up to ${Math.ceil(want*0.35)} lateral picks from your own knowledge (mark source "lateral") — genuinely off the beaten path, escaping the obvious algorithm.\n2. Stay within or close to the tempo window ${JSON.stringify([Math.round(profile.bpm.p25),Math.round(profile.bpm.p75)])} BPM (half/double-time is fine — note it).\n3. Favor harmonic compatibility with the dominant keys ${JSON.stringify(profile.topCamelot.map(k=>k.name))}.\n4. Do NOT recommend the DJ's top artists or tracks they likely own. Favor deep cuts over obvious hits.\n5. For EVERY pick give your best estimate of bpm (number) and camelot key (e.g. "8A"). If unsure, estimate from genre conventions and say so briefly.\n6. Keep reasons to ONE punchy sentence tying the pick to their taste.\n</instructions>\n\nReturn STRICT JSON array, each item: {"artist":string,"track":string,"bpm":number,"camelot":string,"subgenre":string,"source":"similar"|"adjacent"|"lateral"|"label","reason":string,"confidence":0..1}. No other text.`;
+  const anchorText = (opts.anchors&&opts.anchors.length)
+    ? `\n\n<taste_anchors>\nThese are the BULLSEYE of the DJ's taste — weight them heavily, match their sonic signature:\n${opts.anchors.map(a=>`- ${a.artist}${a.track?' – '+a.track:''}`).join('\n')}\n</taste_anchors>` : '';
 
-  log('Claude · ranking & enriching candidates…');
-  const out = await claudeCall(sys, user, 4000);
+  const user = `<dj_profile>\n${JSON.stringify(profileForLLM(profile),null,2)}\n</dj_profile>${anchorText}\n\n<candidate_pool>\n${poolText}\n</candidate_pool>\n\n<instructions>\nReturn the ${want} best picks this DJ likely does NOT know but would love. ${pocketNote}\nRules:\n1. Prefer pool candidates; you may ADD up to ${Math.ceil(want*0.4)} lateral picks from your own knowledge (mark source "lateral") — genuinely under-the-radar, recent where possible.\n2. HARD RULE: no mainstream/chart names (e.g. Anyma, ARTBAT, Tale of Us, Adriatique, Massano, CamelPhat, Vintage Culture, Solomun) and nothing by the DJ's listed top artists. Favor small labels and deep cuts.\n3. Stay within tempo window ${JSON.stringify(opts.effBpm||[Math.round(profile.bpm.p25),Math.round(profile.bpm.p75)])} BPM (½/×2 ok — note it).\n4. Favor harmonic compatibility with dominant keys ${JSON.stringify(profile.topCamelot.map(k=>k.name))}.\n5. For EVERY pick estimate bpm (number) and camelot key (e.g. "8A").\n6. ONE punchy reason per pick tying it to their taste/anchors.\n</instructions>\n\nReturn STRICT JSON array, each item: {"artist":string,"track":string,"bpm":number,"camelot":string,"subgenre":string,"source":"similar"|"adjacent"|"lateral"|"label","reason":string,"confidence":0..1}. No other text.`;
+
+  log('Claude · ranking & enriching the shortlist…');
+  const out = await claudeCall(sys, user, Math.min(4000, 1200 + want*80));
   return extractJSON(out).map(r=>({
     artist:r.artist, track:r.track,
     bpm:Number(r.bpm)||0, camelot:(r.camelot||'').toUpperCase(),
@@ -1200,30 +1349,35 @@ async function runDiscovery(){
   try{
     let pool=[];
     if(state.keys.lastfm){
-      log('Querying Last.fm…');
+      log('Gathering free candidates (Last.fm)…');
       pool = pool.concat(await lastfmCandidates(p, opts, log));
       if(state.keys.discogs) pool = pool.concat(await discogsLabelMates(p, log));
     }
-    pool = dedupeCandidates(pool, p, opts);
+    // cheap-first: hard, FREE qualification BEFORE spending any LLM tokens
+    pool = qualifyPool(pool, p, opts);
+    state.lastPoolSize = pool.length;
 
     let results;
-    if(state.keys.claude){
-      results = await claudeRank(p, pool, opts, log);
+    const useClaude = opts.useClaude && state.keys.claude;
+    if(useClaude){
+      const shortlist = pool.slice(0, Math.min(35, Math.max(opts.count, 20)));   // tokens scale with the shortlist, not the universe
+      log(`Claude · ranking ${shortlist.length || 'fresh'} qualified picks…`);
+      results = await claudeRank(p, shortlist, opts, log);
     } else if(pool.length){
-      // Last.fm only — present grounded candidates (BPM/key unknown)
+      // token-free tier: present the qualified Last.fm candidates directly
       results = pool.slice(0, opts.count).map(c=>({
         artist:c.artist, track:c.track, bpm:0, camelot:'',
         subgenre:c.tag||c.label||'', source:c.source,
-        reason: c.source==='similar' ? `Listeners of ${c.seed?('“'+c.seed+'”'):'your tracks'} also play this — different signal than your video feed.`
-              : c.source==='adjacent' ? `Top track in “${c.tag}”, one step sideways from your core genres.`
-              : c.label ? `On ${c.label}, a label you rate — classic crate digging.` : `Collaborative-filtering match.`,
+        reason: c.source==='similar' ? `Listeners of ${c.seed?('“'+c.seed+'”'):'your tracks'} also play this — different signal than your feed.`
+              : c.source==='adjacent' ? `Top track in “${c.tag}”, one step sideways from your core.`
+              : c.label ? `On ${c.label}, a label you rate — crate digging.` : `Collaborative-filtering match.`,
         match:c.match||0.5,
       }));
     } else {
       results = offlineSuggestions(p, opts);
     }
 
-    // hard filters
+    // final safety filters (source toggles, tempo/key on enriched picks)
     results = applyFilters(results, p, opts);
     state.results = results;
     renderResults(results, p, opts, logs);
@@ -1235,7 +1389,7 @@ async function runDiscovery(){
 }
 
 function readOpts(){
-  return {
+  const o = {
     bpmTol:+$('#bpmTol').value,
     count:+$('#resCount').value,
     harmonic:$('#tgHarmonic').checked,
@@ -1245,20 +1399,36 @@ function readOpts(){
     similar:$('#tgSimilar').checked,
     adjacent:$('#tgAdjacent').checked,
     lateral:$('#tgLateral').checked,
+    obscurity:+($('#obscurity')?$('#obscurity').value:0),
+    useClaude:$('#tgClaude')?$('#tgClaude').checked:false,
+    anchors:parseAnchors(),
   };
+  // taste-pocket focus → tighten the BPM window + harmonic key set for filtering
+  const sel = state.selectedPockets, p = state.profile;
+  if(sel && sel.size && p && p.pockets){
+    o.pocketFamilies = sel;
+    const ps = p.pockets.filter(x=>sel.has(x.name));
+    const los = ps.map(x=>x.bpm[0]).filter(Boolean), his = ps.map(x=>x.bpm[1]).filter(Boolean);
+    if(los.length && his.length) o.effBpm = [Math.min(...los), Math.max(...his)];
+    const keys = new Set(); ps.forEach(x=>x.keys.forEach(k=>camelotCompat(k).forEach(c=>keys.add(c))));
+    if(keys.size) o.effKeys = keys;
+  }
+  return o;
 }
 
 function bpmInWindow(bpm, p, opts){
   if(!bpm) return true;                                  // unknown bpm passes (Last.fm tier)
-  const lo=p.bpm.p25-opts.bpmTol, hi=p.bpm.p75+opts.bpmTol;
+  const win = (opts && opts.effBpm) || [p.bpm.p25, p.bpm.p75];   // pocket window if focused
+  const lo=win[0]-opts.bpmTol, hi=win[1]+opts.bpmTol;
   const test = b => b>=lo && b<=hi;
   if(test(bpm)) return true;
   if(opts.halfDouble && (test(bpm*2)||test(bpm/2))) return true;
   return false;
 }
-function keyCompatible(cam, p){
+function keyCompatible(cam, p, opts){
   if(!cam || !/^\d{1,2}[AB]$/.test(cam)) return true;     // unknown key passes
-  return p.compatSet.has(cam);
+  const set = (opts && opts.effKeys) || p.compatSet;     // pocket key-set if focused
+  return set.has(cam);
 }
 function applyFilters(results, p, opts){
   return results.filter(r=>{
@@ -1266,7 +1436,7 @@ function applyFilters(results, p, opts){
     if(opts.similar===false && r.source==='similar') return false;
     if(opts.adjacent===false && r.source==='adjacent') return false;
     if(opts.tempo && !bpmInWindow(r.bpm,p,opts)) return false;
-    if(opts.harmonic && !keyCompatible(r.camelot,p)) return false;
+    if(opts.harmonic && !keyCompatible(r.camelot,p,opts)) return false;
     if(opts.newArtists && r.artist && p.existingArtists.has(r.artist.toLowerCase())) return false;
     return true;
   }).slice(0, opts.count);
@@ -1277,8 +1447,9 @@ function applyFilters(results, p, opts){
 =========================================================================== */
 function renderResults(results, p, opts, logs){
   const area=$('#resultsArea');
-  const tier = state.keys.claude ? 'Claude + '+(state.keys.lastfm?'Last.fm':'knowledge')
-             : state.keys.lastfm ? 'Last.fm collaborative filtering'
+  const usedClaude = opts.useClaude && state.keys.claude;
+  const tier = usedClaude ? 'Claude · ranked '+(state.keys.lastfm?`${state.lastPoolSize} qualified candidates`:'from profile')
+             : state.keys.lastfm ? `Last.fm · ${state.lastPoolSize} qualified candidates · token-free`
              : 'Offline starting points';
 
   let explore='';
@@ -1370,10 +1541,16 @@ function updateTierChips(){
 }
 function updateEngineNote(){
   const n=$('#engineNote'); if(!n) return;
-  if(state.keys.claude && state.keys.lastfm) n.textContent='Full power: Last.fm discovery + Claude ranking, BPM/key enrichment & reasons.';
-  else if(state.keys.claude) n.textContent='Claude is generating grounded deep-cut picks from your profile. Add a Last.fm key for real collaborative-filtering candidates.';
-  else if(state.keys.lastfm) n.textContent='Last.fm collaborative filtering active. Add an Anthropic key for BPM/key enrichment & one-line reasons.';
-  else n.textContent='Offline mode: smart starting-point links. Add a Last.fm and/or Anthropic key in ⚙ Settings to unlock real discovery.';
+  const claude=!!state.keys.claude, lf=!!state.keys.lastfm;
+  const useC=$('#tgClaude')?$('#tgClaude').checked:false;
+  const focus = state.selectedPockets.size ? ` · focused on ${[...state.selectedPockets].join(' + ')}` : '';
+  let s;
+  if(!lf && !claude) s='Offline: taste analysis + smart search links. Add a free Last.fm key in ⚙ Settings for real discovery — no Claude needed.';
+  else if(lf && !(useC&&claude)) s='Token-free: Last.fm filtered to your pockets, tempo, keys & obscurity. Flip “Use Claude” on to rank + explain the shortlist (spends tokens only on qualified picks).';
+  else if(useC&&claude&&lf) s='Free Last.fm shortlist → Claude ranks & explains only the qualified picks. Token-thrifty by design.';
+  else if(useC&&claude&&!lf) s='Claude proposes from your profile (no Last.fm pool). Add a Last.fm key to ground picks & save tokens.';
+  else s='Add a Last.fm key for token-free discovery.';
+  n.textContent = s + focus;
 }
 
 /* ===========================================================================
@@ -1385,7 +1562,7 @@ function ingestText(text){
   if(!tracks.length) throw new Error('No tracks found.');
   state.tracks = tracks;
   state.profile = computeProfile(tracks);
-  state.exploreArtists=[]; state.results=[];
+  state.exploreArtists=[]; state.results=[]; state.selectedPockets=new Set();
   renderDashboard();
   toast(`Loaded ${tracks.length} tracks`);
 }
@@ -1481,7 +1658,9 @@ function wire(){
   // sliders
   $('#bpmTol').oninput=e=>$('#bpmTolVal').textContent='±'+e.target.value;
   $('#resCount').oninput=e=>$('#countVal').textContent=e.target.value;
+  $('#obscurity').oninput=e=>$('#obscVal').textContent=e.target.value;
   $$('.toggle input').forEach(cb=>cb.onchange=()=>cb.closest('.toggle').classList.toggle('on',cb.checked));
+  $('#tgClaude').addEventListener('change',updateEngineNote);
 
   // discovery
   $('#btnDiscover').onclick=runDiscovery;
@@ -1493,7 +1672,7 @@ function wire(){
   $('#saveSettings').onclick=saveSettings;
   $('#testLastfm').onclick=testLastfm;
   $('#testClaude').onclick=testClaude;
-  $('#clearData').onclick=()=>{ if(confirm('Remove all stored API keys from this browser?')){ localStorage.removeItem(LS); state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6'}; updateTierChips(); updateEngineNote(); $('#settingsModal').classList.remove('open'); toast('Cleared'); } };
+  $('#clearData').onclick=()=>{ if(confirm('Remove all stored API keys + cached Last.fm data from this browser?')){ Object.keys(localStorage).filter(k=>k===LS||k.startsWith('offgrid.lfm.')).forEach(k=>localStorage.removeItem(k)); state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6'}; updateTierChips(); updateEngineNote(); $('#settingsModal').classList.remove('open'); toast('Cleared'); } };
   $('#settingsModal').addEventListener('click',e=>{ if(e.target.id==='settingsModal') $('#settingsModal').classList.remove('open'); });
 
   // about
