@@ -233,6 +233,46 @@
   .act.yt:hover{border-color:#ff4d4d;color:#ff6b6b}
   .act.bp:hover{border-color:var(--accent);color:var(--accent)}
   .act.lf:hover{border-color:#d51007;color:#ff5a4d}
+  .act.sc:hover{border-color:#ff5500;color:#ff7722}
+  .act.bc:hover{border-color:#1da0c3;color:#33c3e3}
+  .act.save{font-size:16px;line-height:1;background:transparent}
+  .act.save:hover{border-color:rgba(255,46,136,.5);color:var(--accent-2)}
+  .act.save.saved{border-color:rgba(255,46,136,.45);color:var(--accent-2);background:rgba(255,46,136,.08)}
+
+  .crate-panel-wrap{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px}
+  .crate-panel-wrap h2{margin:0 0 14px;font-size:13px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:9px}
+
+  /* ---------- library health ---------- */
+  .health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px}
+  .health-item{display:flex;flex-direction:column;gap:5px}
+  .health-pct{font-family:var(--mono);font-weight:800;font-size:22px;letter-spacing:-.5px}
+  .health-track{height:6px;background:var(--panel-3);border-radius:4px;overflow:hidden}
+  .health-fill{height:100%;border-radius:4px;transition:width .7s cubic-bezier(.2,.7,.2,1)}
+  .health-lbl{font-size:11.5px;color:var(--muted)}
+
+  /* ---------- setlist builder ---------- */
+  .setlist-controls{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;margin-bottom:14px}
+  .setlist-controls .ctrl-sm{display:flex;flex-direction:column;gap:5px;min-width:90px}
+  .setlist-controls .ctrl-sm label{font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap}
+  .setlist-controls select,.setlist-controls input[type=text],.setlist-controls input[type=number]{
+    background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;
+    padding:7px 10px;font-size:13px;font-family:inherit;
+  }
+  .setlist-controls input[type=number]{width:80px}
+  .setlist-controls select:focus,.setlist-controls input:focus{outline:none;border-color:var(--accent-3)}
+  .sl-list{display:flex;flex-direction:column}
+  .sl-row{display:grid;grid-template-columns:26px 62px 62px 1fr auto;gap:10px;align-items:center;
+    padding:10px 14px;border-bottom:1px solid var(--border-soft);font-size:13px;transition:.12s}
+  .sl-row:hover{background:rgba(255,255,255,.02)}
+  .sl-row:last-child{border-bottom:none}
+  .sl-row .sr-num{font-family:var(--mono);color:var(--dim);text-align:center;font-size:12px}
+  .sl-row .sr-bpm{font-family:var(--mono);color:var(--accent-4);font-weight:600}
+  .sl-row .sr-key{font-family:var(--mono);font-weight:700}
+  .sl-row .sr-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .sl-row .sr-title .ar{color:var(--accent)}
+  .sl-row .sr-acts{display:flex;gap:5px;flex-shrink:0}
+  .sl-arrow{text-align:center;font-size:11px;padding:2px 0;color:var(--dim);font-family:var(--mono);
+    background:linear-gradient(to right,transparent,rgba(51,177,255,.06),transparent)}
 
   .empty{text-align:center;padding:40px 20px;color:var(--dim)}
   .empty .ic{font-size:34px;margin-bottom:10px}
@@ -308,6 +348,7 @@
     </div>
     <div class="top-actions">
       <button class="btn ghost sm" id="btnReset" style="display:none">↺ New file</button>
+      <button class="btn ghost sm" id="btnOpenCrate" style="display:none" title="Jump to saved crate">♥ Crate&nbsp;<span id="crateCount">0</span></button>
       <button class="btn icon" id="btnSettings" title="Settings & API keys">⚙</button>
     </div>
   </div>
@@ -370,6 +411,9 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
     <!-- stat strip -->
     <div class="stats" id="statStrip" style="margin-bottom:16px"></div>
 
+    <!-- library health -->
+    <div class="card" id="healthCard" style="margin-bottom:16px"></div>
+
     <!-- profile grid -->
     <div class="grid two-col" style="grid-template-columns:1fr 1fr;margin-bottom:16px">
       <div class="card">
@@ -406,6 +450,35 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
         <div class="chips" id="topRemixers" style="margin-bottom:14px"></div>
         <div class="chips" id="topLabels"></div>
       </div>
+    </div>
+
+    <!-- setlist builder -->
+    <div class="card" id="setlistCard" style="margin-bottom:16px">
+      <h2><span class="bar" style="background:var(--accent-4)"></span>Setlist Builder <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dim);font-size:11px;margin-left:auto">harmonic journey from your library</span></h2>
+      <div class="setlist-controls">
+        <div class="ctrl-sm">
+          <label>Starting key</label>
+          <select id="slKey"><option value="">Auto</option></select>
+        </div>
+        <div class="ctrl-sm">
+          <label>BPM from</label>
+          <input type="number" id="slBpmLo" min="40" max="220" step="1" placeholder="120" style="width:80px" />
+        </div>
+        <div class="ctrl-sm">
+          <label>BPM to (arc)</label>
+          <input type="number" id="slBpmHi" min="40" max="220" step="1" placeholder="134" style="width:80px" />
+        </div>
+        <div class="ctrl-sm" style="flex:1;min-width:130px">
+          <label>Genre filter</label>
+          <input type="text" id="slGenre" placeholder="e.g. techno" style="width:100%" />
+        </div>
+        <div class="ctrl-sm">
+          <label>Tracks <span id="slCountVal">12</span></label>
+          <input type="range" id="slCount" min="4" max="24" step="2" value="12" style="margin-top:4px" />
+        </div>
+        <button class="btn primary" id="btnSetlist" style="align-self:flex-end">☉ Build set</button>
+      </div>
+      <div id="setlistResult"></div>
     </div>
 
     <!-- ============ DISCOVERY ============ -->
@@ -451,6 +524,9 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
 
     <!-- results -->
     <div id="resultsArea"></div>
+
+    <!-- saved crate -->
+    <div id="savedCratePanel" class="hide" style="margin-bottom:16px"></div>
 
   </section>
 </main>
@@ -563,6 +639,7 @@ const state = {
   exploreArtists: [],
   selectedPockets: new Set(),   // taste-pocket focus (empty = whole library)
   lastPoolSize: 0,
+  savedCrate: [],               // tracks saved across sessions
 };
 function loadKeys(){
   try{
@@ -902,6 +979,9 @@ function renderDashboard(){
   renderTopLists(p);
   renderPockets(p);
   updateEngineNote();
+  renderSavedCrate();
+  renderHealthCard(p);
+  initSetlistControls(p);
 }
 
 function renderGenreBars(p){
@@ -946,6 +1026,141 @@ function renderTopLists(p){
   $('#topLabels').innerHTML = p.labels.length
     ? p.labels.map(x=>chip(x,'label')).join('')
     : '<span style="color:var(--dim);font-size:12.5px">Label field is empty in this export (common) — Discogs enrichment can recover it.</span>';
+}
+
+/* ----- Library Health ----- */
+function renderHealthCard(p){
+  const card = $('#healthCard'); if(!card) return;
+  const n = p.count || 1;
+  const genreN = state.tracks.filter(t=>t.genre).length;
+  const bpmPct = Math.round(p.bpmKnown/n*100);
+  const keyPct  = Math.round(p.keyKnown/n*100);
+  const genrePct= Math.round(genreN/n*100);
+  const ratedPct= Math.round(p.rated/n*100);
+
+  const bar=(pct,color)=>`<div class="health-track"><div class="health-fill" style="width:${pct}%;background:${color}"></div></div>`;
+  const col=(pct,label,missing,color)=>`<div class="health-item">
+    <div class="health-pct" style="color:${color}">${pct}%</div>
+    ${bar(pct,color)}
+    <div class="health-lbl">${label} · <span style="color:var(--dim)">${missing} missing</span></div>
+  </div>`;
+
+  card.innerHTML = `<h2><span class="bar" style="background:var(--accent-4)"></span>Library health</h2>
+  <div class="health-grid">
+    ${col(bpmPct,'BPM',n-p.bpmKnown,'var(--accent-4)')}
+    ${col(keyPct,'Key',n-p.keyKnown,'var(--accent-3)')}
+    ${col(genrePct,'Genre',n-genreN,'var(--accent)')}
+    ${col(ratedPct,'Rated',n-p.rated,'var(--accent-2)')}
+  </div>`;
+}
+
+/* ----- Setlist Builder ----- */
+function buildSetlist(startKey, bpmLo, bpmHi, genreFilter, count, arcEnd){
+  // pool: own tracks that have BPM + Camelot
+  let pool = state.tracks.filter(t=>t.bpm>0 && t.camelot);
+  if(genreFilter) pool = pool.filter(t=>(t.genre||'').toLowerCase().includes(genreFilter.toLowerCase()));
+  if(bpmLo || bpmHi){
+    const lo=bpmLo||0, hi=bpmHi||999;
+    pool = pool.filter(t=>t.bpm>=lo && t.bpm<=hi);
+  }
+  if(!pool.length) return [];
+
+  // weight by rating × plays so top tracks come up first
+  pool = pool.slice().sort((a,b)=>((b.rating||0.4)*(1+b.playCount)) - ((a.rating||0.4)*(1+a.playCount)));
+
+  const result=[];
+  const used=new Set();
+  const trackKey = t => (t.id && t.id!=='') ? t.id : (t.artist+'|'+t.name).toLowerCase();
+  const bpmCenter = ((bpmLo||state.profile.bpm.p25)+(bpmHi||state.profile.bpm.p75))/2;
+
+  // pick first track
+  let curKey=startKey||null, curBpm=bpmCenter;
+  let first;
+  if(curKey){
+    const compat=camelotCompat(curKey);
+    const inKey=pool.filter(t=>compat.has(t.camelot));
+    first=(inKey.length?inKey:pool).sort((a,b)=>Math.abs(a.bpm-bpmCenter)-Math.abs(b.bpm-bpmCenter))[0];
+  } else {
+    first=pool.sort((a,b)=>Math.abs(a.bpm-bpmCenter)-Math.abs(b.bpm-bpmCenter))[0];
+  }
+  if(!first) return [];
+  result.push(first); used.add(trackKey(first));
+  curKey=first.camelot; curBpm=first.bpm;
+
+  for(let i=1;i<count;i++){
+    // BPM arc target for this step
+    const frac = (count>1) ? i/(count-1) : 0;
+    const arcTarget = arcEnd && bpmLo ? bpmCenter + frac*(arcEnd-bpmCenter) : curBpm;
+    const compat=camelotCompat(curKey);
+    const candidates=pool.filter(t=>!used.has(trackKey(t)) && compat.has(t.camelot));
+    if(!candidates.length) break;
+    const next=candidates.sort((a,b)=>Math.abs(a.bpm-arcTarget)-Math.abs(b.bpm-arcTarget))[0];
+    result.push(next); used.add(trackKey(next));
+    curKey=next.camelot; curBpm=next.bpm;
+  }
+  return result;
+}
+
+function renderSetlistResult(tracks){
+  const area=$('#setlistResult'); if(!area) return;
+  if(!tracks.length){
+    area.innerHTML=`<div class="empty"><div class="ic">⊘</div>No tracks matched. Widen the BPM range, clear the genre filter, or check that your library has BPM + key metadata.</div>`;
+    return;
+  }
+  const totalMin = Math.round(tracks.reduce((s,t)=>s+(t.bpm>0?60/t.bpm*128:0),0)/60*10)/10; // rough
+  let html=`<div class="sl-list fade">`;
+  tracks.forEach((t,i)=>{
+    const camN = (t.camelot.match(/\d+/)) ? +t.camelot.match(/\d+/)[0] : 0;
+    const keyColor = `hsl(${keyHue(camN)},70%,72%)`;
+    const q = encodeURIComponent((t.artist?t.artist+' ':'')+t.name);
+    const title = t.artist ? `<span class="ar">${esc(t.artist)}</span> — ${esc(t.name)}` : esc(t.name);
+    if(i>0){
+      const prev=tracks[i-1];
+      const delta=prev.bpm?Math.round(t.bpm-prev.bpm):0;
+      const keyChange = prev.camelot===t.camelot?'same key':`${prev.camelot}→${t.camelot}`;
+      html+=`<div class="sl-arrow">↓ ${delta>0?'+':''}${delta} BPM · ${keyChange}</div>`;
+    }
+    html+=`<div class="sl-row">
+      <div class="sr-num">${i+1}</div>
+      <div class="sr-bpm">${Math.round(t.bpm)}</div>
+      <div class="sr-key" style="color:${keyColor}">${esc(t.camelot)}</div>
+      <div class="sr-title">${title}</div>
+      <div class="sr-acts">
+        <a class="act yt" href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener" title="YouTube">▶</a>
+        <a class="act bc" href="https://bandcamp.com/search?q=${q}&item_type=t" target="_blank" rel="noopener" title="Bandcamp">⬡</a>
+      </div>
+    </div>`;
+  });
+  html+=`</div>`;
+  // footer controls
+  html+=`<div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;align-items:center">
+    <span style="font-size:12px;color:var(--dim)">${tracks.length} tracks · ~${totalMin} min</span>
+    <button class="btn sm" id="btnSlCopy">⧉ Copy set</button>
+    <button class="btn sm" id="btnSlCsv">↓ CSV</button>
+  </div>`;
+  area.innerHTML=html;
+
+  $('#btnSlCopy').onclick=()=>{
+    const txt=tracks.map((t,i)=>`${i+1}. ${Math.round(t.bpm)} BPM  ${t.camelot}  ${t.artist?t.artist+' — ':''}${t.name}`).join('\n');
+    navigator.clipboard.writeText(txt).then(()=>toast('Setlist copied'));
+  };
+  $('#btnSlCsv').onclick=()=>{
+    const head='pos,bpm,camelot,artist,track,genre\n';
+    const body=tracks.map((t,i)=>[i+1,Math.round(t.bpm),t.camelot,t.artist,t.name,t.genre].map(c=>`"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob=new Blob([head+body],{type:'text/csv'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='offgrid-setlist.csv'; a.click();
+    toast('Setlist CSV downloaded');
+  };
+}
+
+function initSetlistControls(p){
+  const sel=$('#slKey'); if(!sel) return;
+  // populate key dropdown from top camelot keys
+  const opts=p.topCamelot.slice(0,8).map(k=>`<option value="${k.name}">${k.name}</option>`).join('');
+  sel.innerHTML=`<option value="">Auto (best fit)</option>${opts}`;
+  // pre-fill BPM fields from library window
+  $('#slBpmLo').value=Math.round(p.bpm.p25)||'';
+  $('#slBpmHi').value=Math.round(p.bpm.p75)||'';
 }
 
 /* ----- Camelot wheel SVG ----- */
@@ -1141,6 +1356,8 @@ function qualifyPool(list, p, opts){
 // ---- search-link helpers ----
 const ytSearch = q => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
 const bpSearch = q => `https://www.beatport.com/search?q=${encodeURIComponent(q)}`;
+const bcSearch = q => `https://bandcamp.com/search?q=${encodeURIComponent(q)}&item_type=t`;
+const scSearch = q => `https://soundcloud.com/search/tracks?q=${encodeURIComponent(q)}`;
 const lfSearch = (ar,tr) => tr
   ? `https://www.last.fm/music/${encodeURIComponent(ar)}/_/${encodeURIComponent(tr)}`
   : `https://www.last.fm/music/${encodeURIComponent(ar)}`;
@@ -1529,6 +1746,102 @@ function applyFilters(results, p, opts){
 }
 
 /* ===========================================================================
+   5b. SAVED CRATE — localStorage persistence + panel
+=========================================================================== */
+function loadCrate(){
+  try{
+    const s = JSON.parse(localStorage.getItem('offgrid.crate.v1') || '[]');
+    state.savedCrate = Array.isArray(s) ? s : [];
+  }catch(e){ state.savedCrate = []; }
+}
+function saveCrate(){
+  try{ localStorage.setItem('offgrid.crate.v1', JSON.stringify(state.savedCrate)); }catch(e){}
+}
+function isSaved(r){
+  const k = (r.artist+'|'+r.track).toLowerCase();
+  return state.savedCrate.some(t => (t.artist+'|'+t.track).toLowerCase() === k);
+}
+function toggleSave(r){
+  const k = (r.artist+'|'+r.track).toLowerCase();
+  const idx = state.savedCrate.findIndex(t => (t.artist+'|'+t.track).toLowerCase() === k);
+  if(idx >= 0) state.savedCrate.splice(idx, 1);
+  else state.savedCrate.push(Object.assign({}, r, {savedAt: new Date().toISOString()}));
+  saveCrate();
+  updateCrateCount();
+  renderSavedCrate();
+  return idx < 0; // true = now saved
+}
+function updateCrateCount(){
+  const n = state.savedCrate.length;
+  const btn = $('#btnOpenCrate'), cnt = $('#crateCount');
+  if(btn) btn.style.display = n ? '' : 'none';
+  if(cnt) cnt.textContent = n;
+}
+function renderSavedCrate(){
+  const panel = $('#savedCratePanel'); if(!panel) return;
+  if(!state.savedCrate.length){ panel.classList.add('hide'); return; }
+  panel.classList.remove('hide');
+  const rows = state.savedCrate.map((r, i) => {
+    const q = (r.artist ? r.artist+' ' : '') + r.track;
+    const yt = ytSearch(q), bp = bpSearch(q), bc = bcSearch(q), sc = scSearch(q);
+    const camN = (r.camelot && r.camelot.match && r.camelot.match(/\d+/)) ? +r.camelot.match(/\d+/)[0] : 0;
+    const title = r.artist ? `<span class="ar">${esc(r.artist)}</span> — ${esc(r.track)}` : esc(r.track);
+    const pills = [
+      r.bpm ? `<span class="pill bpm">${Math.round(r.bpm)} BPM</span>` : '',
+      r.camelot && /^\d/.test(r.camelot) ? `<span class="pill key" style="color:hsl(${keyHue(camN)},70%,72%)">${esc(r.camelot)}</span>` : '',
+      `<span class="pill src ${r.source}">${esc(r.source)}</span>`,
+    ].filter(Boolean).join('');
+    return `<div class="resrow">
+      <div class="rank">${i+1}</div>
+      <div class="main">
+        <div class="tt">${title}</div>
+        <div class="meta">${pills}</div>
+        ${r.reason ? `<div class="reason">${esc(r.reason)}</div>` : ''}
+      </div>
+      <div class="actions">
+        <a class="act yt" href="${yt}" target="_blank" rel="noopener" title="YouTube">▶</a>
+        <a class="act bp" href="${bp}" target="_blank" rel="noopener" title="Beatport">◈</a>
+        <a class="act bc" href="${bc}" target="_blank" rel="noopener" title="Bandcamp">⬡</a>
+        <a class="act sc" href="${sc}" target="_blank" rel="noopener" title="SoundCloud">☁</a>
+        <button class="act save saved" data-crate-idx="${i}" title="Remove from crate">♥</button>
+      </div>
+    </div>`;
+  }).join('');
+  panel.innerHTML = `<div class="crate-panel-wrap fade">
+    <h2><span class="bar" style="background:var(--accent-2)"></span>Saved Crate
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dim);font-size:11px;margin-left:auto">${state.savedCrate.length} track${state.savedCrate.length!==1?'s':''}</span>
+    </h2>
+    <div class="reslist" id="crateList">${rows}</div>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn sm" id="btnCrateCsv">↓ CSV</button>
+      <button class="btn sm" id="btnCrateTxt">⧉ Copy list</button>
+      <button class="btn ghost sm" id="btnCrateClear" style="color:var(--danger);margin-left:auto">✕ Clear crate</button>
+    </div>
+  </div>`;
+  panel.querySelectorAll('[data-crate-idx]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = +btn.getAttribute('data-crate-idx');
+      state.savedCrate.splice(idx, 1);
+      saveCrate(); updateCrateCount(); renderSavedCrate();
+      toast('Removed from crate');
+    };
+  });
+  $('#btnCrateCsv').onclick = () => downloadCSV(state.savedCrate);
+  $('#btnCrateTxt').onclick = () => {
+    const txt = state.savedCrate.map((r,i) =>
+      `${i+1}. ${r.artist?r.artist+' — ':''}${r.track}${r.bpm?` [${Math.round(r.bpm)}bpm`:''}${r.camelot&&/^\d/.test(r.camelot)?(r.bpm?' ':' [')+r.camelot+']':r.bpm?']':''}`
+    ).join('\n');
+    navigator.clipboard.writeText(txt).then(() => toast('Crate list copied ♥'));
+  };
+  $('#btnCrateClear').onclick = () => {
+    if(confirm('Clear the entire saved crate?')){
+      state.savedCrate = []; saveCrate(); updateCrateCount(); renderSavedCrate();
+      toast('Crate cleared');
+    }
+  };
+}
+
+/* ===========================================================================
    6. RENDER RESULTS
 =========================================================================== */
 function renderResults(results, p, opts, logs){
@@ -1552,6 +1865,8 @@ function renderResults(results, p, opts, logs){
   const rows = results.map((r,i)=>{
     const yt = ytSearch(r.query || ((r.artist?r.artist+' ':'')+r.track));
     const bp = bpSearch(r.beatportQuery || (r.artist?r.artist+' '+r.track:r.track));
+    const bc = bcSearch((r.artist?r.artist+' ':'')+r.track);
+    const sc = scSearch((r.artist?r.artist+' ':'')+r.track);
     const lf = r.artist ? lfSearch(r.artist, r.query?'':r.track) : '';
     const camN = (r.camelot.match&&r.camelot.match(/\d+/)) ? +r.camelot.match(/\d+/)[0] : 0;
     const title = r.artist ? `<span class="ar">${esc(r.artist)}</span> — ${esc(r.track)}` : esc(r.track);
@@ -1577,7 +1892,10 @@ function renderResults(results, p, opts, logs){
       <div class="actions">
         <a class="act yt" href="${yt}" target="_blank" rel="noopener" title="YouTube search">▶</a>
         <a class="act bp" href="${bp}" target="_blank" rel="noopener" title="Beatport search">◈</a>
+        <a class="act bc" href="${bc}" target="_blank" rel="noopener" title="Bandcamp search">⬡</a>
+        <a class="act sc" href="${sc}" target="_blank" rel="noopener" title="SoundCloud search">☁</a>
         ${lf?`<a class="act lf" href="${lf}" target="_blank" rel="noopener" title="Last.fm">♪</a>`:''}
+        <button class="act save${isSaved(r)?' saved':''}" data-ridx="${i}" title="${isSaved(r)?'Remove from crate':'Save to crate'}">${isSaved(r)?'♥':'♡'}</button>
       </div>
     </div>`;
   }).join('');
@@ -1606,6 +1924,22 @@ function renderResults(results, p, opts, logs){
     else s.sort((a,b)=>((b.score!=null?b.score:b.match||0)-((a.score!=null?a.score:a.match||0))));
     state.results=s; renderResults(s,p,opts,logs);
   };
+
+  // wire save/crate buttons on this results list
+  const reslist = $('#reslist');
+  if(reslist) reslist.querySelectorAll('[data-ridx]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const idx = +btn.getAttribute('data-ridx');
+      const r = results[idx]; if(!r) return;
+      const saved = toggleSave(r);
+      btn.classList.toggle('saved', saved);
+      btn.title = saved ? 'Remove from crate' : 'Save to crate';
+      btn.textContent = saved ? '♥' : '♡';
+      toast(saved ? 'Added to crate ♥' : 'Removed from crate');
+    };
+  });
+
+  renderSavedCrate();
   $('#btnCopy').onclick = ()=>{
     const txt = results.map((r,i)=>`${i+1}. ${r.artist?r.artist+' — ':''}${r.track}${r.bpm?` [${Math.round(r.bpm)}bpm`:''}${r.camelot&&/^\d/.test(r.camelot)?(r.bpm?' ':' [')+r.camelot+']':r.bpm?']':''}`).join('\n');
     navigator.clipboard.writeText(txt).then(()=>toast('Crate list copied'));
@@ -1761,6 +2095,25 @@ function wire(){
   $('#btnDiscover').onclick=runDiscovery;
   $('#btnReset').onclick=()=>{ state.tracks=[];state.profile=null; $('#dashboard').classList.add('hide'); $('#hero').classList.remove('hide'); $('#btnReset').style.display='none'; $('#resultsArea').innerHTML=''; $('#fileInput').value=''; };
 
+  // setlist builder
+  if($('#slCount')){
+    $('#slCount').oninput=e=>$('#slCountVal').textContent=e.target.value;
+    $('#btnSetlist').onclick=()=>{
+      const p=state.profile; if(!p){ toast('Load a library first'); return; }
+      const startKey=$('#slKey').value.trim();
+      const bpmLo=parseFloat($('#slBpmLo').value)||0;
+      const bpmHi=parseFloat($('#slBpmHi').value)||0;
+      const genre=$('#slGenre').value.trim();
+      const count=parseInt($('#slCount').value)||12;
+      const arcEnd=bpmHi&&bpmLo&&bpmHi!==bpmLo ? bpmHi : 0;
+      const effective_lo=bpmLo&&bpmHi?Math.min(bpmLo,bpmHi):bpmLo;
+      const effective_hi=bpmLo&&bpmHi?Math.max(bpmLo,bpmHi):bpmHi;
+      const set=buildSetlist(startKey,effective_lo,effective_hi,genre,count,arcEnd);
+      renderSetlistResult(set);
+      if(set.length) $('#setlistResult').scrollIntoView({behavior:'smooth',block:'nearest'});
+    };
+  }
+
   // settings modal
   $('#btnSettings').onclick=openSettings;
   $('#closeSettings').onclick=()=>$('#settingsModal').classList.remove('open');
@@ -1776,13 +2129,22 @@ function wire(){
   $('#closeAbout').onclick=$('#closeAbout2').onclick=()=>$('#aboutModal').classList.remove('open');
   $('#aboutModal').addEventListener('click',e=>{ if(e.target.id==='aboutModal') $('#aboutModal').classList.remove('open'); });
 
+  // crate jump button
+  $('#btnOpenCrate').onclick = () => {
+    const panel = $('#savedCratePanel');
+    if(panel) panel.scrollIntoView({behavior:'smooth'});
+  };
+
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ $('#settingsModal').classList.remove('open'); $('#aboutModal').classList.remove('open'); } });
 }
 
 /* ---- boot ---- */
 loadKeys();
+loadCrate();
 updateTierChips();
+updateCrateCount();
 wire();
+renderSavedCrate();
 </script>
 </body>
 </html>
