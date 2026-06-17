@@ -66,9 +66,9 @@ To make your own export in Rekordbox: **File → Export Collection in xml format
 
 | Tier | Needs | What you get |
 |------|-------|--------------|
-| **Offline** | nothing | Full taste analysis (genre fingerprint, tempo histogram, Camelot wheel, top artists/labels) + smart YouTube/Beatport starting-point links for adjacent genres and similar-artist digging. |
-| **+ Last.fm** | free API key | Real collaborative-filtering discovery: tracks/artists "people who like X also play", plus adjacent-genre top tracks, with match scores. Filtered to your tempo window and harmonic keys. |
-| **+ Anthropic** | API key | Claude re-ranks the candidate pool, estimates **BPM + Camelot key** for each pick, adds lateral deep cuts that pure similarity misses, and writes a one-line "why you'll like this" reason per track. |
+| **Free / no key** | nothing | Full taste analysis (genre fingerprint, tempo histogram, Camelot wheel, top artists/labels) **+ real ListenBrainz + MusicBrainz collaborative-filtering recommendations**, plus smart YouTube/Beatport/Bandcamp starting-point links. |
+| **+ Last.fm** | free API key | Adds Last.fm collaborative-filtering discovery: tracks/artists "people who like X also play", plus adjacent-genre top tracks, with match scores. Filtered to your tempo window and harmonic keys. |
+| **+ AI engine** | a provider key (Gemini/Groq/OpenRouter/Mistral free, or paid Claude) | The AI **infers your style from the seed tracks**, then re-ranks the pool to stay strictly in-lane, estimates **BPM + Camelot key** per pick, adds in-style lateral deep cuts, and writes a one-line "why it fits" reason. Pick the provider in **⚙ Settings**. |
 
 Add keys in **⚙ Settings**. They are stored only in this browser's `localStorage` and sent
 directly to each service.
@@ -78,7 +78,12 @@ directly to each service.
 so OFFGRID surfaces real, orthogonal recommendations the moment you load a library. The keys below
 just add more signals:
 - **Last.fm API key** — https://www.last.fm/api/account/create (paste the *API key*, not the secret). No OAuth needed for the reads this app makes.
-- **Anthropic API key** — https://console.anthropic.com/settings/keys . Calls use the official `anthropic-dangerous-direct-browser-access` browser header. A full discovery run costs a fraction of a cent.
+- **AI engine** *(pick one in Settings)* — the AI stage infers your style from the seed tracks, then ranks + explains the picks. **Choose your provider** — most have a free tier, all are called directly from the browser:
+  - **Google Gemini** — https://aistudio.google.com/apikey · *free tier*
+  - **Groq** — https://console.groq.com/keys · *free, very fast*
+  - **OpenRouter** — https://openrouter.ai/keys · *free models (`:free`)*
+  - **Mistral** — https://console.mistral.ai/api-keys · *free tier*
+  - **Anthropic Claude** — https://console.anthropic.com/settings/keys · *paid, deepest reasoning*
 - **Discogs token** *(optional)* — at https://www.discogs.com/settings/developers click **"Generate token"** and paste the **personal access token** (a ~40-char string), **not** an app's consumer key/secret. Unlocks label-mate digging (other artists on labels you rate).
 
 ---
@@ -95,7 +100,7 @@ Engagement-optimised feeds reinforce what you already play. OFFGRID deliberately
    real, mixable candidates. Works with zero keys, so OFFGRID does genuine discovery out of the box.
 3. **Label-mate digging** (Discogs, optional) — other artists on labels you rate.
 4. **Adjacent-subgenre exploration** — one curated step sideways from your core genres.
-5. **Lateral picks** (Claude) — tastemaker deep cuts that similarity graphs miss.
+5. **Style-locked AI picks** (your chosen engine) — the AI infers your exact sub-genre/tempo from the seeds and adds in-lane tastemaker deep cuts that pure similarity graphs miss, while rejecting off-style or mainstream candidates.
 
 Then it filters for DJs: only your **tempo window** (with ½ / ×2 matching) and
 **harmonically-compatible Camelot keys** survive, and anything already in your crate is dropped.
