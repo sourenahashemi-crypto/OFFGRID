@@ -2120,7 +2120,21 @@ function wire(){
   $('#saveSettings').onclick=saveSettings;
   $('#testLastfm').onclick=testLastfm;
   $('#testClaude').onclick=testClaude;
-  $('#clearData').onclick=()=>{ if(confirm('Remove all stored API keys + cached discovery data from this browser?')){ Object.keys(localStorage).filter(k=>k===LS||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.')).forEach(k=>localStorage.removeItem(k)); state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6'}; updateTierChips(); updateEngineNote(); $('#settingsModal').classList.remove('open'); toast('Cleared'); } };
+  $('#clearData').onclick=()=>{
+    if(confirm('Remove all stored API keys + cached discovery data from this browser?')){
+      Object.keys(localStorage)
+        .filter(k=>k===LS||k==='offgrid.crate.v1'||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.'))
+        .forEach(k=>localStorage.removeItem(k));
+      state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6'};
+      state.savedCrate=[];
+      updateTierChips();
+      updateEngineNote();
+      updateCrateCount();
+      renderSavedCrate();
+      $('#settingsModal').classList.remove('open');
+      toast('Cleared');
+    }
+  };
   $('#settingsModal').addEventListener('click',e=>{ if(e.target.id==='settingsModal') $('#settingsModal').classList.remove('open'); });
 
   // about
