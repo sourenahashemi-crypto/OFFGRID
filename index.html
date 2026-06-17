@@ -589,6 +589,24 @@ function reportError(err){
   toast(msg);
 }
 
+function hashString(str){
+  let h = 5381;
+  for(let i=0;i<str.length;i++) h = ((h << 5) + h) ^ str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+function cacheGet(prefix, key, maxAgeMs){
+  try{
+    const raw = localStorage.getItem(prefix + key);
+    if(!raw) return null;
+    const o = JSON.parse(raw);
+    if(!o || (Date.now() - o.t) > maxAgeMs) return null;
+    return o.v;
+  }catch(e){ return null; }
+}
+function cacheSet(prefix, key, value){
+  try{ localStorage.setItem(prefix + key, JSON.stringify({ t:Date.now(), v:value })); }catch(e){}
+}
+
 /* ===========================================================================
    1. CAMELOT / KEY NORMALISATION
 =========================================================================== */
@@ -1215,12 +1233,22 @@ async function discogsLabelMates(profile, log){
   for(const lab of profile.labels.slice(0,3)){
     log(`Discogs · roster of ${lab.name}`);
     try{
-      const s = await fetch(`https://api.discogs.com/database/search?type=label&q=${encodeURIComponent(lab.name)}&token=${state.keys.discogs}&per_page=1`,
-        {headers:{'User-Agent':'OFFGRID/1.0'}}).then(r=>r.json());
+      const sKey = hashString(`search|${lab.name.toLowerCase()}`);
+      let s = cacheGet('offgrid.discogs.', sKey, 6048e5);
+      if(!s){
+        s = await fetch(`https://api.discogs.com/database/search?type=label&q=${encodeURIComponent(lab.name)}&token=${state.keys.discogs}&per_page=1`,
+          {headers:{'User-Agent':'OFFGRID/1.0'}}).then(r=>r.json());
+        cacheSet('offgrid.discogs.', sKey, s);
+      }
       const id = s.results && s.results[0] && s.results[0].id;
       if(!id) continue;
-      const rel = await fetch(`https://api.discogs.com/labels/${id}/releases?per_page=25&sort=year&sort_order=desc&token=${state.keys.discogs}`,
-        {headers:{'User-Agent':'OFFGRID/1.0'}}).then(r=>r.json());
+      const rKey = hashString(`label_releases|${id}`);
+      let rel = cacheGet('offgrid.discogs.', rKey, 6048e5);
+      if(!rel){
+        rel = await fetch(`https://api.discogs.com/labels/${id}/releases?per_page=25&sort=year&sort_order=desc&token=${state.keys.discogs}`,
+          {headers:{'User-Agent':'OFFGRID/1.0'}}).then(r=>r.json());
+        cacheSet('offgrid.discogs.', rKey, rel);
+      }
       asArray(rel.releases).forEach(rl=>{
         if(rl.artist && rl.title){ out.push({artist:rl.artist.replace(/\s*\(\d+\)$/,''), track:rl.title, match:0.55, source:'label', label:lab.name}); }
       });
@@ -1292,6 +1320,19 @@ function profileForLLM(p){
 
 async function claudeRank(profile, pool, opts, log){
   const want = opts.count;
+  const cachePayload = {
+    model: state.keys.model||'claude-sonnet-4-6',
+    want,
+    profile: profileForLLM(profile),
+    anchors: opts.anchors||[],
+    effBpm: opts.effBpm||null,
+    pockets: opts.pocketFamilies ? [...opts.pocketFamilies] : [],
+    pool: pool.map(c=>[c.artist,c.track,c.source,Math.round((c.match||0)*100)]),
+  };
+  const cKey = hashString(JSON.stringify(cachePayload));
+  const cached = cacheGet('offgrid.claude.', cKey, 432e5);
+  if(cached) return cached;
+
   const pocketNote = opts.pocketFamilies && opts.pocketFamilies.size
     ? `The DJ is focusing on these taste pockets right now: ${[...opts.pocketFamilies].join(', ')}. Stay inside that lane.` : '';
   const sys = `You are a world-class DJ and crate-digging A&R with encyclopedic knowledge of electronic and dance music. You help DJs ESCAPE algorithmic feeds by recommending deep, mixable, NON-OBVIOUS tracks from smaller/newer artists. You NEVER recommend mainstream chart names or the DJ's existing artists. You ground picks in real, findable releases and reason about tempo + harmonic (Camelot) mixability. Return STRICT JSON only — no prose, no markdown.`;
@@ -1308,12 +1349,14 @@ async function claudeRank(profile, pool, opts, log){
 
   log('Claude · ranking & enriching the shortlist…');
   const out = await claudeCall(sys, user, Math.min(4000, 1200 + want*80));
-  return extractJSON(out).map(r=>({
+  const ranked = extractJSON(out).map(r=>({
     artist:r.artist, track:r.track,
     bpm:Number(r.bpm)||0, camelot:(r.camelot||'').toUpperCase(),
     subgenre:r.subgenre||'', source:r.source||'lateral',
     reason:r.reason||'', match:typeof r.confidence==='number'?r.confidence:0.7,
   })).filter(r=>r.artist&&r.track);
+  cacheSet('offgrid.claude.', cKey, ranked);
+  return ranked;
 }
 
 // ---- offline tier: smart starting-point links ----
@@ -1377,8 +1420,10 @@ async function runDiscovery(){
       results = offlineSuggestions(p, opts);
     }
 
-    // final safety filters (source toggles, tempo/key on enriched picks)
-    results = applyFilters(results, p, opts);
+    // final safety filters + transparent scoring for rank quality.
+    results = decorateScores(applyFilters(results, p, opts), p, opts)
+      .sort((a,b)=>(b.score||0)-(a.score||0))
+      .slice(0, opts.count);
     state.results = results;
     renderResults(results, p, opts, logs);
   }catch(e){
@@ -1430,6 +1475,47 @@ function keyCompatible(cam, p, opts){
   const set = (opts && opts.effKeys) || p.compatSet;     // pocket key-set if focused
   return set.has(cam);
 }
+
+function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+function scoreResult(r, p, opts){
+  const fit = clamp01(r.match!=null ? r.match : 0.5);
+
+  const win = (opts && opts.effBpm) || [p.bpm.p25, p.bpm.p75];
+  const center = (win[0]+win[1]) / 2;
+  const span = Math.max(6, ((win[1]-win[0]) / 2) + (opts.bpmTol||0));
+  let bpmFit = 0.55;
+  if(r.bpm){
+    const cands = opts.halfDouble ? [r.bpm, r.bpm*2, r.bpm/2] : [r.bpm];
+    const d = Math.min(...cands.map(b=>Math.abs(b-center)));
+    bpmFit = clamp01(1 - (d / span));
+  }
+
+  let keyFit = 0.55;
+  if(r.camelot && /^\d{1,2}[AB]$/.test(r.camelot)) keyFit = keyCompatible(r.camelot, p, opts) ? 1 : 0.2;
+  const mix = (bpmFit + keyFit) / 2;
+
+  const novelty = (!r.artist || !p.existingArtists.has(r.artist.toLowerCase())) ? 1 : 0.2;
+  const src = { similar:0.9, adjacent:0.82, label:0.86, lateral:0.78 }[r.source] || 0.75;
+
+  const score = clamp01(0.4*fit + 0.35*mix + 0.15*novelty + 0.1*src);
+  return {
+    score,
+    parts:{
+      fit:Math.round(fit*100),
+      mix:Math.round(mix*100),
+      novelty:Math.round(novelty*100),
+      source:Math.round(src*100),
+    }
+  };
+}
+
+function decorateScores(results, p, opts){
+  return results.map(r=>{
+    const s = scoreResult(r,p,opts);
+    return Object.assign({}, r, { score:s.score, scoreParts:s.parts });
+  });
+}
+
 function applyFilters(results, p, opts){
   return results.filter(r=>{
     if(opts.lateral===false && r.source==='lateral') return false;
@@ -1439,7 +1525,7 @@ function applyFilters(results, p, opts){
     if(opts.harmonic && !keyCompatible(r.camelot,p,opts)) return false;
     if(opts.newArtists && r.artist && p.existingArtists.has(r.artist.toLowerCase())) return false;
     return true;
-  }).slice(0, opts.count);
+  });
 }
 
 /* ===========================================================================
@@ -1475,14 +1561,18 @@ function renderResults(results, p, opts, logs){
       r.subgenre ? `<span class="pill">${esc(r.subgenre)}</span>`:'',
       `<span class="pill src ${r.source}">${esc(r.source)}</span>`,
     ].join('');
-    const mpct=Math.round((r.match||0)*100);
+    const spct=Math.round(((r.score!=null?r.score:r.match)||0)*100);
+    const parts = r.scoreParts
+      ? `<div class="reason">Score · fit ${r.scoreParts.fit} · mix ${r.scoreParts.mix} · novelty ${r.scoreParts.novelty} · source ${r.scoreParts.source}</div>`
+      : '';
     return `<div class="resrow">
       <div class="rank">${i+1}</div>
       <div class="main">
         <div class="tt">${title}</div>
         <div class="meta">${pills}</div>
         ${r.reason?`<div class="reason">${esc(r.reason)}</div>`:''}
-        <div class="match"><div class="mt"><div class="mf" style="width:${mpct}%"></div></div><span class="mv">${mpct}% fit</span></div>
+        ${parts}
+        <div class="match"><div class="mt"><div class="mf" style="width:${spct}%"></div></div><span class="mv">${spct}% overall</span></div>
       </div>
       <div class="actions">
         <a class="act yt" href="${yt}" target="_blank" rel="noopener" title="YouTube search">▶</a>
@@ -1499,7 +1589,7 @@ function renderResults(results, p, opts, logs){
       <span style="font-size:12px;color:var(--dim)">via ${esc(tier)}</span>
       <div style="flex:1"></div>
       <select id="sortSel">
-        <option value="fit">Sort: best fit</option>
+        <option value="fit">Sort: best overall</option>
         <option value="bpm">Sort: BPM</option>
         <option value="src">Sort: source</option>
       </select>
@@ -1513,7 +1603,7 @@ function renderResults(results, p, opts, logs){
     const v=e.target.value; let s=[...results];
     if(v==='bpm') s.sort((a,b)=>(b.bpm||0)-(a.bpm||0));
     else if(v==='src') s.sort((a,b)=>a.source.localeCompare(b.source));
-    else s.sort((a,b)=>(b.match||0)-(a.match||0));
+    else s.sort((a,b)=>((b.score!=null?b.score:b.match||0)-((a.score!=null?a.score:a.match||0))));
     state.results=s; renderResults(s,p,opts,logs);
   };
   $('#btnCopy').onclick = ()=>{
@@ -1524,8 +1614,13 @@ function renderResults(results, p, opts, logs){
 }
 
 function downloadCSV(results){
-  const head='rank,artist,track,bpm,camelot,subgenre,source,fit,reason\n';
-  const body=results.map((r,i)=>[i+1,r.artist,r.track,r.bpm||'',r.camelot||'',r.subgenre||'',r.source,Math.round((r.match||0)*100),(r.reason||'').replace(/"/g,"'")]
+  const head='rank,artist,track,bpm,camelot,subgenre,source,overall,fit,mix,novelty,reason\n';
+  const body=results.map((r,i)=>[i+1,r.artist,r.track,r.bpm||'',r.camelot||'',r.subgenre||'',r.source,
+    Math.round(((r.score!=null?r.score:r.match)||0)*100),
+    r.scoreParts ? r.scoreParts.fit : Math.round((r.match||0)*100),
+    r.scoreParts ? r.scoreParts.mix : '',
+    r.scoreParts ? r.scoreParts.novelty : '',
+    (r.reason||'').replace(/"/g,"'")]
     .map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob=new Blob([head+body],{type:'text/csv'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='offgrid-crate.csv'; a.click();
@@ -1672,7 +1767,7 @@ function wire(){
   $('#saveSettings').onclick=saveSettings;
   $('#testLastfm').onclick=testLastfm;
   $('#testClaude').onclick=testClaude;
-  $('#clearData').onclick=()=>{ if(confirm('Remove all stored API keys + cached Last.fm data from this browser?')){ Object.keys(localStorage).filter(k=>k===LS||k.startsWith('offgrid.lfm.')).forEach(k=>localStorage.removeItem(k)); state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6'}; updateTierChips(); updateEngineNote(); $('#settingsModal').classList.remove('open'); toast('Cleared'); } };
+  $('#clearData').onclick=()=>{ if(confirm('Remove all stored API keys + cached discovery data from this browser?')){ Object.keys(localStorage).filter(k=>k===LS||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.')).forEach(k=>localStorage.removeItem(k)); state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6'}; updateTierChips(); updateEngineNote(); $('#settingsModal').classList.remove('open'); toast('Cleared'); } };
   $('#settingsModal').addEventListener('click',e=>{ if(e.target.id==='settingsModal') $('#settingsModal').classList.remove('open'); });
 
   // about
