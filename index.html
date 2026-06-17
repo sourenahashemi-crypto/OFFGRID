@@ -222,6 +222,7 @@
   .pill.src.adjacent{color:var(--accent-3)}
   .pill.src.lateral{color:var(--accent-2)}
   .pill.src.label{color:var(--warn)}
+  .pill.src.listenbrainz{color:var(--accent-4)}
   .resrow .reason{font-size:12.5px;color:var(--muted);margin-top:7px;line-height:1.4}
   .resrow .match{display:flex;align-items:center;gap:6px;margin-top:7px}
   .resrow .match .mt{width:80px;height:5px;background:var(--panel-3);border-radius:4px;overflow:hidden}
@@ -238,6 +239,18 @@
   .act.save{font-size:16px;line-height:1;background:transparent}
   .act.save:hover{border-color:rgba(255,46,136,.5);color:var(--accent-2)}
   .act.save.saved{border-color:rgba(255,46,136,.45);color:var(--accent-2);background:rgba(255,46,136,.08)}
+  /* audio preview button — hidden until the opt-in toggle is enabled */
+  .act.pv{display:none;font-size:12px}
+  body.previews-on .act.pv{display:flex}
+  .act.pv:hover{border-color:var(--accent);color:var(--accent)}
+  .act.pv.playing{border-color:var(--accent);color:var(--accent);background:rgba(0,255,163,.1)}
+
+  /* crate diversity readout */
+  .crate-div{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--dim);margin:-4px 0 12px}
+  .crate-div .dvlabel{text-transform:uppercase;letter-spacing:.6px;font-size:10px}
+  .crate-div .dv{font-family:var(--mono);color:var(--muted)}
+  .crate-div .balbar{width:56px;height:5px;background:var(--panel-3);border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle}
+  .crate-div .balbar > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent-3),var(--accent))}
 
   .crate-panel-wrap{background:var(--panel);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px}
   .crate-panel-wrap h2{margin:0 0 14px;font-size:13px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:700;display:flex;align-items:center;gap:9px}
@@ -505,6 +518,10 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
           <label>Obscurity — skip the obvious <span class="val" id="obscVal">40</span></label>
           <input type="range" id="obscurity" min="0" max="100" step="10" value="40" />
         </div>
+        <div class="ctrl">
+          <label>Variety — spread the crate <span class="val" id="varietyVal">50</span></label>
+          <input type="range" id="variety" min="0" max="100" step="10" value="50" />
+        </div>
       </div>
 
       <div class="toggles" style="margin-bottom:16px">
@@ -515,6 +532,7 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
         <label class="toggle on"><input type="checkbox" id="tgSimilar" checked> Similar tracks</label>
         <label class="toggle on"><input type="checkbox" id="tgAdjacent" checked> Adjacent genres</label>
         <label class="toggle on"><input type="checkbox" id="tgLateral" checked> Lateral / deep cuts</label>
+        <label class="toggle on"><input type="checkbox" id="tgListen" checked> ListenBrainz (free, no key)</label>
         <label class="toggle"><input type="checkbox" id="tgClaude"> ✦ Use Claude (rank + reasons)</label>
       </div>
 
@@ -580,11 +598,18 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
 
       <div class="field">
         <label>Discogs token <span style="color:var(--dim);font-weight:400">— optional, label-mate crate digging</span></label>
-        <div class="desc">Personal token from <a href="https://www.discogs.com/settings/developers" target="_blank">discogs.com/settings/developers</a>. Used to surface other artists on your favourite labels.</div>
+        <div class="desc">At <a href="https://www.discogs.com/settings/developers" target="_blank">discogs.com/settings/developers</a> click <b>“Generate token”</b> and paste the <b>personal access token</b> (a ~40-char string) — <b>not</b> the consumer key/secret of an app. Used to surface other artists on labels you rate.</div>
         <div class="row">
           <input type="text" id="keyDiscogs" placeholder="optional personal token" spellcheck="false" />
+          <button class="btn sm" id="testDiscogs">Test</button>
           <span class="keystat idle" id="statDiscogs">optional</span>
         </div>
+      </div>
+
+      <div class="field">
+        <label>Audio previews <span style="color:var(--dim);font-weight:400">— hear a 30-second clip in-app</span></label>
+        <div class="desc">Off by default. When enabled, OFFGRID queries Apple's public <b>iTunes Search API</b> (no key) with each track's title to fetch a 30-second preview. This means those track titles leave your machine — everything else stays local. The search links always work regardless.</div>
+        <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="keyPreviews"> Enable in-app audio previews</label>
       </div>
 
     </div>
@@ -632,7 +657,7 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
 --------------------------------------------------------------------------- */
 const LS = 'offgrid.v1';
 const state = {
-  keys: { lastfm:'', claude:'', discogs:'', model:'claude-sonnet-4-6' },
+  keys: { lastfm:'', claude:'', discogs:'', model:'claude-sonnet-4-6', previews:false },
   tracks: [],
   profile: null,
   results: [],
@@ -1362,6 +1387,41 @@ const lfSearch = (ar,tr) => tr
   ? `https://www.last.fm/music/${encodeURIComponent(ar)}/_/${encodeURIComponent(tr)}`
   : `https://www.last.fm/music/${encodeURIComponent(ar)}`;
 
+/* ---------------------------------------------------------------------------
+   AUDIO PREVIEWS  (opt-in — Apple iTunes Search API, no key, 30-day cache)
+   Only ever runs when state.keys.previews is true. Fails gracefully: if no
+   preview is found or the request is blocked, the search links still work.
+--------------------------------------------------------------------------- */
+const pvBtnHTML = q => `<button class="act pv" data-pvq="${esc(q)}" title="Preview 30s · Apple">▷</button>`;
+async function itunesPreview(query){
+  const ck = hashString('pv|'+query.toLowerCase());
+  const hit = cacheGet('offgrid.itunes.', ck, 2592e6); // 30 days
+  if(hit !== null) return hit;                          // cached, incl. cached "no result"
+  const u = `https://itunes.apple.com/search?media=music&entity=song&limit=3&term=${encodeURIComponent(query)}`;
+  const r = await fetch(u);
+  const j = await r.json().catch(()=>({}));
+  const t = (j.results||[]).find(x=>x.previewUrl);
+  const v = t ? { url:t.previewUrl, art:t.artworkUrl100||'' } : false;
+  cacheSet('offgrid.itunes.', ck, v);
+  return v;
+}
+let _pvAudio=null, _pvBtn=null;
+function pvReset(btn){ if(btn){ btn.classList.remove('playing'); btn.textContent='▷'; } }
+async function previewTrack(query, btn){
+  if(!state.keys.previews || !query) return;
+  if(_pvBtn===btn && _pvAudio && !_pvAudio.paused){ _pvAudio.pause(); pvReset(btn); _pvBtn=null; return; } // toggle off
+  if(_pvAudio){ _pvAudio.pause(); pvReset(_pvBtn); }
+  btn.textContent='…';
+  let info;
+  try{ info = await itunesPreview(query); }
+  catch(e){ pvReset(btn); toast('Preview blocked (network/CORS) — use the search links'); return; }
+  if(!info || !info.url){ pvReset(btn); toast('No Apple preview for this one — try YouTube / Bandcamp below'); return; }
+  _pvAudio = new Audio(info.url); _pvBtn=btn;
+  _pvAudio.onended = ()=>{ pvReset(btn); _pvBtn=null; };
+  _pvAudio.onerror = ()=>{ pvReset(btn); _pvBtn=null; toast('Could not play preview'); };
+  _pvAudio.play().then(()=>{ btn.classList.add('playing'); btn.textContent='⏸'; }).catch(()=>pvReset(btn));
+}
+
 // ---- Last.fm API (with 7-day localStorage cache → re-runs cost no calls) ----
 function lfmCacheGet(k){
   try{ const o=JSON.parse(localStorage.getItem('offgrid.lfm.'+k)||'null'); if(o && Date.now()-o.t < 6048e5) return o.v; }catch(e){}
@@ -1476,6 +1536,75 @@ async function discogsLabelMates(profile, log){
 }
 
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+/* ---------------------------------------------------------------------------
+   ListenBrainz + MusicBrainz  —  FREE, NO KEY, CORS-enabled
+   A genuinely orthogonal collaborative-filtering signal (MetaBrainz open data,
+   different from Last.fm and from any video feed). Chain:
+     artist name --MusicBrainz--> MBID --ListenBrainz--> similar artists (CF)
+     similar artist MBID --ListenBrainz--> that artist's top recordings (tracks)
+   Everything is cached in localStorage so re-runs cost no calls. Verified live
+   from the browser (June 2026): all three endpoints return 200 + CORS '*'.
+--------------------------------------------------------------------------- */
+const LB_ALGO = 'session_based_days_9000_session_300_contribution_5_threshold_15_limit_50_skip_30';
+async function mbArtistMBID(name){
+  const ck = hashString('mb|'+name.toLowerCase());
+  const hit = cacheGet('offgrid.mb.', ck, 2592e6); if(hit!==null) return hit;   // 30-day cache (incl. "not found")
+  const u = `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent('artist:"'+name+'"')}&fmt=json&limit=1`;
+  const r = await fetch(u);
+  const j = await r.json().catch(()=>({}));
+  const mbid = (j.artists && j.artists[0] && j.artists[0].id) || false;
+  cacheSet('offgrid.mb.', ck, mbid);
+  await sleep(1100);                                  // MusicBrainz courtesy ~1 req/sec — only after a real call
+  return mbid;
+}
+async function lbGet(url){
+  const ck = hashString(url);
+  const hit = cacheGet('offgrid.lb.', ck, 6048e5); if(hit!==null) return hit;   // 7-day cache
+  const r = await fetch(url);
+  const j = await r.json().catch(()=>([]));
+  cacheSet('offgrid.lb.', ck, j);
+  return j;
+}
+async function listenbrainzCandidates(profile, opts, log){
+  const tracks=[], explore=new Map();
+  // seeds: user anchors first, then top-rated profile artists
+  let seeds = (opts.anchors||[]).filter(a=>a.artist).map(a=>a.artist)
+    .concat(profile.artists.map(a=>a.name)).filter(Boolean);
+  seeds = [...new Set(seeds.map(s=>s.trim()).filter(Boolean))].slice(0,4);
+  for(const name of seeds){
+    log(`ListenBrainz · digging similar to ${name}`);
+    let mbid;
+    try{ mbid = await mbArtistMBID(name); }catch(e){ log('· '+e.message); continue; }
+    if(!mbid) continue;
+    let sims=[];
+    try{ sims = await lbGet(`https://labs.api.listenbrainz.org/similar-artists/json?artist_mbids=${mbid}&algorithm=${LB_ALGO}`); }
+    catch(e){ log('· '+e.message); continue; }
+    if(!Array.isArray(sims)) continue;
+    const novel = sims.filter(a=>a.artist_mbid && a.name
+        && a.name.toLowerCase()!==name.toLowerCase()
+        && !profile.existingArtists.has(a.name.toLowerCase())
+        && !(opts.obscurity>=60 && MEGA.has(a.name.toLowerCase())))
+      .slice(0,6);
+    novel.forEach(a=>explore.set(a.name, Math.max(explore.get(a.name)||0, a.score||0)));
+    for(const a of novel.slice(0,3)){                              // strongest similars -> real tracks
+      let recs=[];
+      try{ recs = await lbGet(`https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/${a.artist_mbid}`); }catch(e){}
+      asArray(recs).slice(0,3).forEach(t=>{
+        if(t.artist_name && t.recording_name)
+          tracks.push({artist:t.artist_name, track:t.recording_name, match:0.6, source:'listenbrainz',
+                       seed:name, popularity:t.total_listen_count||0});
+      });
+      await sleep(120);
+    }
+  }
+  // surface the similar artists in the "Artists to explore" rail (merged with Last.fm's)
+  const seen = new Set(state.exploreArtists.map(a=>a.name.toLowerCase()));
+  Array.from(explore.entries()).sort((a,b)=>b[1]-a[1]).slice(0,16).forEach(([name,score])=>{
+    if(!seen.has(name.toLowerCase())) state.exploreArtists.push({name, match:Math.min(1,(score||0)/8000)});
+  });
+  return tracks;
+}
 
 function dedupeCandidates(list, profile, opts){
   const seen=new Set(), out=[];
@@ -1611,7 +1740,21 @@ async function runDiscovery(){
     if(state.keys.lastfm){
       log('Gathering free candidates (Last.fm)…');
       pool = pool.concat(await lastfmCandidates(p, opts, log));
-      if(state.keys.discogs) pool = pool.concat(await discogsLabelMates(p, log));
+    }
+    // ListenBrainz + MusicBrainz — free, no key. A second, orthogonal CF signal.
+    if(opts.listenbrainz){
+      log('ListenBrainz · free collaborative filtering…');
+      try{ pool = pool.concat(await listenbrainzCandidates(p, opts, log)); }
+      catch(e){ log('ListenBrainz · '+e.message); }
+    }
+    // Discogs runs on its own — independent of Last.fm — whenever a token is set.
+    if(state.keys.discogs){
+      if(!p.labels.length){
+        log('Discogs · no Label data in your library to dig.');
+        toast('Discogs needs the Label field, which is empty in this export — add labels in Rekordbox, or load the XML.');
+      } else {
+        pool = pool.concat(await discogsLabelMates(p, log));
+      }
     }
     // cheap-first: hard, FREE qualification BEFORE spending any LLM tokens
     pool = qualifyPool(pool, p, opts);
@@ -1630,6 +1773,7 @@ async function runDiscovery(){
         subgenre:c.tag||c.label||'', source:c.source,
         reason: c.source==='similar' ? `Listeners of ${c.seed?('“'+c.seed+'”'):'your tracks'} also play this — different signal than your feed.`
               : c.source==='adjacent' ? `Top track in “${c.tag}”, one step sideways from your core.`
+              : c.source==='listenbrainz' ? `ListenBrainz open-data CF: fans of ${c.seed?esc(c.seed):'your artists'} dig this — orthogonal to your feed.`
               : c.label ? `On ${c.label}, a label you rate — crate digging.` : `Collaborative-filtering match.`,
         match:c.match||0.5,
       }));
@@ -1637,10 +1781,10 @@ async function runDiscovery(){
       results = offlineSuggestions(p, opts);
     }
 
-    // final safety filters + transparent scoring for rank quality.
-    results = decorateScores(applyFilters(results, p, opts), p, opts)
-      .sort((a,b)=>(b.score||0)-(a.score||0))
-      .slice(0, opts.count);
+    // final safety filters + transparent scoring, then diversity-aware re-rank
+    // (MMR) so no single artist / genre / source dominates the crate.
+    const scored = decorateScores(applyFilters(results, p, opts), p, opts);
+    results = diversitySelect(scored, opts.count, opts.lambda);
     state.results = results;
     renderResults(results, p, opts, logs);
   }catch(e){
@@ -1661,10 +1805,14 @@ function readOpts(){
     similar:$('#tgSimilar').checked,
     adjacent:$('#tgAdjacent').checked,
     lateral:$('#tgLateral').checked,
+    listenbrainz:$('#tgListen')?$('#tgListen').checked:false,
     obscurity:+($('#obscurity')?$('#obscurity').value:0),
+    variety:+($('#variety')?$('#variety').value:50),
     useClaude:$('#tgClaude')?$('#tgClaude').checked:false,
     anchors:parseAnchors(),
   };
+  // variety 0→λ1 (pure relevance), 100→λ0.4 (strong declustering); 50→λ0.7
+  o.lambda = 1 - (o.variety/100)*0.6;
   // taste-pocket focus → tighten the BPM window + harmonic key set for filtering
   const sel = state.selectedPockets, p = state.profile;
   if(sel && sel.size && p && p.pockets){
@@ -1712,7 +1860,7 @@ function scoreResult(r, p, opts){
   const mix = (bpmFit + keyFit) / 2;
 
   const novelty = (!r.artist || !p.existingArtists.has(r.artist.toLowerCase())) ? 1 : 0.2;
-  const src = { similar:0.9, adjacent:0.82, label:0.86, lateral:0.78 }[r.source] || 0.75;
+  const src = { similar:0.9, listenbrainz:0.9, adjacent:0.82, label:0.86, lateral:0.78 }[r.source] || 0.75;
 
   const score = clamp01(0.4*fit + 0.35*mix + 0.15*novelty + 0.1*src);
   return {
@@ -1743,6 +1891,59 @@ function applyFilters(results, p, opts){
     if(opts.newArtists && r.artist && p.existingArtists.has(r.artist.toLowerCase())) return false;
     return true;
   });
+}
+
+/* ---------------------------------------------------------------------------
+   DIVERSITY-AWARE RE-RANKING  (MMR / declustering)
+   Research: penalising intra-list similarity buys large diversity gains for a
+   tiny relevance cost (Auralist, WSDM'12 — ~77% less list similarity for ~0.7%
+   accuracy). Instead of a pure score sort we greedily pick the next track that
+   best balances its own score against how similar it is to what's already
+   chosen, so one artist / genre / label / source can't dominate the crate.
+--------------------------------------------------------------------------- */
+function recSimilarity(a, b){
+  if(a.artist && b.artist && a.artist.toLowerCase()===b.artist.toLowerCase()) return 1; // same artist = strongest declustering
+  let s = 0;
+  const ga=(a.subgenre||'').toLowerCase(), gb=(b.subgenre||'').toLowerCase();
+  if(ga && gb && ga===gb) s += 0.45;
+  if(a.source && a.source===b.source) s += 0.32;   // interleave sources so one signal can't flood the crate
+  const la=(a.label||'').toLowerCase(), lb=(b.label||'').toLowerCase();
+  if(la && lb && la===lb) s += 0.22;
+  if(a.bpm && b.bpm && Math.abs(a.bpm-b.bpm)<=1.5) s += 0.10;
+  if(a.camelot && b.camelot && a.camelot===b.camelot) s += 0.08;
+  return Math.min(0.92, s);
+}
+// lambda in [0..1]: 1 = pure relevance (old behaviour), lower = more declustering
+function diversitySelect(scored, count, lambda){
+  const pool = scored.slice().sort((a,b)=>(b.score||0)-(a.score||0));
+  if(lambda>=0.999 || pool.length<=2) return pool.slice(0, count);
+  const chosen=[];
+  while(chosen.length<count && pool.length){
+    let bestI=0, bestV=-Infinity;
+    for(let i=0;i<pool.length;i++){
+      const c=pool[i];
+      let maxSim=0;
+      for(const sNode of chosen){ const sim=recSimilarity(c,sNode); if(sim>maxSim) maxSim=sim; }
+      const mmr = lambda*(c.score||0) - (1-lambda)*maxSim;
+      if(mmr>bestV){ bestV=mmr; bestI=i; }
+    }
+    chosen.push(pool.splice(bestI,1)[0]);
+  }
+  return chosen;
+}
+// variety/balance readout for the chosen crate (Stirling dual-concept diversity)
+function crateDiversity(results){
+  const genre={}; const artists=new Set(), sources=new Set();
+  results.forEach(r=>{
+    const g = (r.subgenre||'').toLowerCase() || ('·'+r.source);
+    genre[g]=(genre[g]||0)+1;
+    if(r.artist) artists.add(r.artist.toLowerCase());
+    if(r.source) sources.add(r.source);
+  });
+  const cats=Object.values(genre), total=cats.reduce((a,b)=>a+b,0)||1;
+  let H=0; cats.forEach(c=>{ const pi=c/total; if(pi>0) H-=pi*Math.log(pi); });
+  const balance = cats.length>1 ? H/Math.log(cats.length) : (results.length?1:0);
+  return { variety:cats.length, artists:artists.size, sources:sources.size, balance };
 }
 
 /* ===========================================================================
@@ -1799,6 +2000,7 @@ function renderSavedCrate(){
         ${r.reason ? `<div class="reason">${esc(r.reason)}</div>` : ''}
       </div>
       <div class="actions">
+        ${r.artist?pvBtnHTML(q):''}
         <a class="act yt" href="${yt}" target="_blank" rel="noopener" title="YouTube">▶</a>
         <a class="act bp" href="${bp}" target="_blank" rel="noopener" title="Beatport">◈</a>
         <a class="act bc" href="${bc}" target="_blank" rel="noopener" title="Bandcamp">⬡</a>
@@ -1847,8 +2049,9 @@ function renderSavedCrate(){
 function renderResults(results, p, opts, logs){
   const area=$('#resultsArea');
   const usedClaude = opts.useClaude && state.keys.claude;
-  const tier = usedClaude ? 'Claude · ranked '+(state.keys.lastfm?`${state.lastPoolSize} qualified candidates`:'from profile')
-             : state.keys.lastfm ? `Last.fm · ${state.lastPoolSize} qualified candidates · token-free`
+  const srcNames = [state.keys.lastfm&&'Last.fm', opts.listenbrainz&&'ListenBrainz', state.keys.discogs&&'Discogs'].filter(Boolean).join(' + ');
+  const tier = usedClaude ? 'Claude · ranked '+(srcNames?`${state.lastPoolSize} qualified candidates`:'from profile')
+             : srcNames ? `${srcNames} · ${state.lastPoolSize} qualified candidates · token-free`
              : 'Offline starting points';
 
   let explore='';
@@ -1890,6 +2093,7 @@ function renderResults(results, p, opts, logs){
         <div class="match"><div class="mt"><div class="mf" style="width:${spct}%"></div></div><span class="mv">${spct}% overall</span></div>
       </div>
       <div class="actions">
+        ${r.artist?pvBtnHTML((r.artist?r.artist+' ':'')+r.track):''}
         <a class="act yt" href="${yt}" target="_blank" rel="noopener" title="YouTube search">▶</a>
         <a class="act bp" href="${bp}" target="_blank" rel="noopener" title="Beatport search">◈</a>
         <a class="act bc" href="${bc}" target="_blank" rel="noopener" title="Bandcamp search">⬡</a>
@@ -1899,6 +2103,16 @@ function renderResults(results, p, opts, logs){
       </div>
     </div>`;
   }).join('');
+
+  const div = crateDiversity(results);
+  const divBar = Math.round(div.balance*100);
+  const divHTML = `<div class="crate-div">
+    <span class="dvlabel">crate spread</span>
+    <span class="dv">${div.artists} artists</span> ·
+    <span class="dv">${div.variety} sub-genres</span> ·
+    <span class="dv">${div.sources} sources</span> ·
+    balance <span class="balbar"><i style="width:${divBar}%"></i></span> <span class="dv">${div.balance.toFixed(2)}</span>
+  </div>`;
 
   area.innerHTML = explore + `<div class="card fade">
     <div class="res-head">
@@ -1914,6 +2128,7 @@ function renderResults(results, p, opts, logs){
       <button class="btn sm" id="btnCopy">⧉ Copy</button>
       <button class="btn sm" id="btnCsv">↓ CSV</button>
     </div>
+    ${divHTML}
     <div class="reslist" id="reslist">${rows}</div>
   </div>`;
 
@@ -1970,15 +2185,18 @@ function updateTierChips(){
 }
 function updateEngineNote(){
   const n=$('#engineNote'); if(!n) return;
-  const claude=!!state.keys.claude, lf=!!state.keys.lastfm;
+  const claude=!!state.keys.claude, lf=!!state.keys.lastfm, dg=!!state.keys.discogs;
+  const lb=$('#tgListen')?$('#tgListen').checked:false;
   const useC=$('#tgClaude')?$('#tgClaude').checked:false;
   const focus = state.selectedPockets.size ? ` · focused on ${[...state.selectedPockets].join(' + ')}` : '';
+  const all = [lf&&'Last.fm', lb&&'ListenBrainz', dg&&'Discogs'].filter(Boolean).join(' + ');
+  const free = [lb&&'ListenBrainz', dg&&'Discogs'].filter(Boolean).join(' + ');
   let s;
-  if(!lf && !claude) s='Offline: taste analysis + smart search links. Add a free Last.fm key in ⚙ Settings for real discovery — no Claude needed.';
-  else if(lf && !(useC&&claude)) s='Token-free: Last.fm filtered to your pockets, tempo, keys & obscurity. Flip “Use Claude” on to rank + explain the shortlist (spends tokens only on qualified picks).';
-  else if(useC&&claude&&lf) s='Free Last.fm shortlist → Claude ranks & explains only the qualified picks. Token-thrifty by design.';
-  else if(useC&&claude&&!lf) s='Claude proposes from your profile (no Last.fm pool). Add a Last.fm key to ground picks & save tokens.';
-  else s='Add a Last.fm key for token-free discovery.';
+  if(useC && claude) s = all ? `Free shortlist (${all}) → Claude ranks & explains only the qualified picks. Token-thrifty by design.`
+                            : 'Claude proposes from your profile. Keep ListenBrainz on (free) or add Last.fm to ground picks & save tokens.';
+  else if(lf) s = `Token-free: ${all} filtered to your pockets, tempo, keys & obscurity. Flip “Use Claude” on to rank + explain the shortlist.`;
+  else if(free) s = `Free, no key: ${free} collaborative-filtering discovery — real picks with zero keys. Add a Last.fm key or Claude for deeper ranking.`;
+  else s = 'Offline: taste analysis + smart search links. Keep ListenBrainz on (it’s free, no key) or add a Last.fm key for real discovery.';
   n.textContent = s + focus;
 }
 
@@ -2054,20 +2272,39 @@ async function testClaude(){
   try{ await claudeCall('Reply with OK.','Say OK',16); s.className='keystat ok'; s.textContent='✓ valid'; }
   catch(e){ s.className='keystat bad'; s.textContent='✗ '+e.message.slice(0,30); }
 }
+async function testDiscogs(){
+  const s=$('#statDiscogs'); state.keys.discogs=$('#keyDiscogs').value.trim();
+  if(!state.keys.discogs){ s.className='keystat idle'; s.textContent='optional'; return; }
+  s.className='keystat idle'; s.textContent='testing…';
+  try{
+    const r = await fetch(`https://api.discogs.com/database/search?type=label&q=warp&per_page=1&token=${encodeURIComponent(state.keys.discogs)}`);
+    if(r.status===401){
+      s.className='keystat bad'; s.textContent='✗ wrong token type';
+      toast('Discogs rejected it. Use the “personal access token” from Settings → Developers (the Generate-token button) — not an app’s consumer key/secret.');
+      return;
+    }
+    if(r.status===429){ s.className='keystat bad'; s.textContent='✗ rate-limited, retry'; return; }
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    s.className='keystat ok'; s.textContent='✓ valid';
+  }catch(e){ s.className='keystat bad'; s.textContent='✗ '+e.message.slice(0,24); }
+}
 
 function openSettings(){
   $('#keyLastfm').value=state.keys.lastfm;
   $('#keyClaude').value=state.keys.claude;
   $('#keyDiscogs').value=state.keys.discogs;
   $('#modelSelect').value=state.keys.model||'claude-sonnet-4-6';
+  $('#keyPreviews').checked=!!state.keys.previews;
   $('#settingsModal').classList.add('open');
 }
+function applyPreviewPref(){ document.body.classList.toggle('previews-on', !!state.keys.previews); }
 function saveSettings(){
   state.keys.lastfm=$('#keyLastfm').value.trim();
   state.keys.claude=$('#keyClaude').value.trim();
   state.keys.discogs=$('#keyDiscogs').value.trim();
   state.keys.model=$('#modelSelect').value;
-  saveKeys(); updateTierChips(); updateEngineNote();
+  state.keys.previews=$('#keyPreviews').checked;
+  saveKeys(); updateTierChips(); updateEngineNote(); applyPreviewPref();
   $('#settingsModal').classList.remove('open');
   toast('Settings saved');
 }
@@ -2088,8 +2325,10 @@ function wire(){
   $('#bpmTol').oninput=e=>$('#bpmTolVal').textContent='±'+e.target.value;
   $('#resCount').oninput=e=>$('#countVal').textContent=e.target.value;
   $('#obscurity').oninput=e=>$('#obscVal').textContent=e.target.value;
+  if($('#variety')) $('#variety').oninput=e=>$('#varietyVal').textContent=e.target.value;
   $$('.toggle input').forEach(cb=>cb.onchange=()=>cb.closest('.toggle').classList.toggle('on',cb.checked));
   $('#tgClaude').addEventListener('change',updateEngineNote);
+  if($('#tgListen')) $('#tgListen').addEventListener('change',updateEngineNote);
 
   // discovery
   $('#btnDiscover').onclick=runDiscovery;
@@ -2120,15 +2359,17 @@ function wire(){
   $('#saveSettings').onclick=saveSettings;
   $('#testLastfm').onclick=testLastfm;
   $('#testClaude').onclick=testClaude;
+  $('#testDiscogs').onclick=testDiscogs;
   $('#clearData').onclick=()=>{
     if(confirm('Remove all stored API keys + cached discovery data from this browser?')){
       Object.keys(localStorage)
-        .filter(k=>k===LS||k==='offgrid.crate.v1'||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.'))
+        .filter(k=>k===LS||k==='offgrid.crate.v1'||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.')||k.startsWith('offgrid.itunes.')||k.startsWith('offgrid.mb.')||k.startsWith('offgrid.lb.'))
         .forEach(k=>localStorage.removeItem(k));
-      state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6'};
+      state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6',previews:false};
       state.savedCrate=[];
       updateTierChips();
       updateEngineNote();
+      applyPreviewPref();
       updateCrateCount();
       renderSavedCrate();
       $('#settingsModal').classList.remove('open');
@@ -2150,12 +2391,19 @@ function wire(){
   };
 
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ $('#settingsModal').classList.remove('open'); $('#aboutModal').classList.remove('open'); } });
+
+  // audio preview (delegated — survives every results / crate re-render)
+  document.addEventListener('click',e=>{
+    const pb = e.target.closest && e.target.closest('.act.pv');
+    if(pb){ e.preventDefault(); previewTrack(pb.getAttribute('data-pvq')||'', pb); }
+  });
 }
 
 /* ---- boot ---- */
 loadKeys();
 loadCrate();
 updateTierChips();
+applyPreviewPref();
 updateCrateCount();
 wire();
 renderSavedCrate();

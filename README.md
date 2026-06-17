@@ -73,10 +73,13 @@ To make your own export in Rekordbox: **File → Export Collection in xml format
 Add keys in **⚙ Settings**. They are stored only in this browser's `localStorage` and sent
 directly to each service.
 
-### Getting keys (both free to create)
+### Keys are optional — discovery works with zero keys
+**ListenBrainz + MusicBrainz** collaborative filtering needs **no key at all** and is on by default,
+so OFFGRID surfaces real, orthogonal recommendations the moment you load a library. The keys below
+just add more signals:
 - **Last.fm API key** — https://www.last.fm/api/account/create (paste the *API key*, not the secret). No OAuth needed for the reads this app makes.
 - **Anthropic API key** — https://console.anthropic.com/settings/keys . Calls use the official `anthropic-dangerous-direct-browser-access` browser header. A full discovery run costs a fraction of a cent.
-- **Discogs token** *(optional)* — https://www.discogs.com/settings/developers . Unlocks label-mate digging (other artists on labels you rate).
+- **Discogs token** *(optional)* — at https://www.discogs.com/settings/developers click **"Generate token"** and paste the **personal access token** (a ~40-char string), **not** an app's consumer key/secret. Unlocks label-mate digging (other artists on labels you rate).
 
 ---
 
@@ -86,24 +89,52 @@ Engagement-optimised feeds reinforce what you already play. OFFGRID deliberately
 **orthogonal signals**:
 
 1. **Cross-platform collaborative filtering** (Last.fm) — built on different data than video feeds.
-2. **Label-mate digging** (Discogs, optional) — other artists on labels you rate.
-3. **Adjacent-subgenre exploration** — one curated step sideways from your core genres.
-4. **Lateral picks** (Claude) — tastemaker deep cuts that similarity graphs miss.
+2. **ListenBrainz + MusicBrainz collaborative filtering** (free, **no key**) — MetaBrainz open-data
+   "fans of artist X also play Y", an independent CF signal. Your top artists are resolved to
+   MusicBrainz IDs, ListenBrainz returns similar artists, and each one's top recordings become
+   real, mixable candidates. Works with zero keys, so OFFGRID does genuine discovery out of the box.
+3. **Label-mate digging** (Discogs, optional) — other artists on labels you rate.
+4. **Adjacent-subgenre exploration** — one curated step sideways from your core genres.
+5. **Lateral picks** (Claude) — tastemaker deep cuts that similarity graphs miss.
 
 Then it filters for DJs: only your **tempo window** (with ½ / ×2 matching) and
 **harmonically-compatible Camelot keys** survive, and anything already in your crate is dropped.
 
+Finally, the surviving picks are **diversity-re-ranked**. Rather than a pure relevance sort —
+which lets one artist, label or sub-genre flood the list — OFFGRID uses MMR ("maximal marginal
+relevance") declustering: each pick is chosen to balance its own fit against how similar it
+already is to what's been selected. Recommender-systems research shows this buys a large jump in
+list diversity for a tiny relevance cost, and the serendipity literature is clear that deep cuts
+help *only when they stay relevant* ("unexpected-yet-relevant"), so the relevance floor is kept.
+The **Variety** slider controls how aggressively the crate is spread, and a **crate-spread**
+readout (distinct artists / sub-genres / sources + a balance score) shows the result.
+
 ---
+
+## Audio previews (opt-in)
+Every recommendation links out to YouTube, Beatport, Bandcamp, SoundCloud and Last.fm. You can
+also play a **30-second preview in-app**: enable *Audio previews* in **⚙ Settings** (off by
+default) and a ▷ button appears on each pick and on your saved crate. Previews use Apple's public
+**iTunes Search API** — no key required. This is the one feature that sends a track title off your
+machine, which is why it is opt-in and clearly labelled; everything else stays local. If a track
+has no Apple match the preview falls back silently to the search links.
 
 ## Privacy & notes
 - The XML is parsed in-browser with `DOMParser`; it is never uploaded.
+- Audio previews are **off by default**. When you turn them on, only the track title is sent to
+  Apple's iTunes Search API to fetch a preview clip; your library, ratings and keys never leave
+  the browser.
 - Rekordbox ratings are stored as 0/51/.../255 — OFFGRID converts to 0–5 stars. Keys are
   normalised from classical **or** Camelot notation to the Camelot wheel.
 - The **Label** field is frequently empty in exports — Discogs enrichment can recover it.
 - Claude can occasionally hallucinate a track name; OFFGRID grounds it against the real Last.fm
   candidate pool and presents every action as a *search* you verify before trusting.
 - Spotify's recommendation/audio-feature endpoints were deprecated for new apps (Nov 2024) and
-  Beatport's API is closed to individuals — that's why discovery uses Last.fm + links, by design.
+  Beatport's API is closed to individuals — that's why discovery uses Last.fm, ListenBrainz and
+  smart links, by design. (Deezer was evaluated but blocks browser requests via CORS.)
+- The free **ListenBrainz / MusicBrainz** lookups send only artist names (and MusicBrainz IDs) to
+  MetaBrainz's open APIs to fetch collaborative-filtering recommendations; no key, and your library
+  never leaves the browser. Results are cached locally so re-runs cost no calls.
 
 ---
 
