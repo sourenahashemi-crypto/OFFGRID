@@ -2360,7 +2360,22 @@ function wire(){
   $('#testLastfm').onclick=testLastfm;
   $('#testClaude').onclick=testClaude;
   $('#testDiscogs').onclick=testDiscogs;
-  $('#clearData').onclick=()=>{ if(confirm('Remove all stored API keys + cached discovery data from this browser?')){ Object.keys(localStorage).filter(k=>k===LS||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.')||k.startsWith('offgrid.itunes.')||k.startsWith('offgrid.mb.')||k.startsWith('offgrid.lb.')).forEach(k=>localStorage.removeItem(k)); state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6',previews:false}; updateTierChips(); updateEngineNote(); applyPreviewPref(); $('#settingsModal').classList.remove('open'); toast('Cleared'); } };
+  $('#clearData').onclick=()=>{
+    if(confirm('Remove all stored API keys + cached discovery data from this browser?')){
+      Object.keys(localStorage)
+        .filter(k=>k===LS||k==='offgrid.crate.v1'||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.')||k.startsWith('offgrid.itunes.')||k.startsWith('offgrid.mb.')||k.startsWith('offgrid.lb.'))
+        .forEach(k=>localStorage.removeItem(k));
+      state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6',previews:false};
+      state.savedCrate=[];
+      updateTierChips();
+      updateEngineNote();
+      applyPreviewPref();
+      updateCrateCount();
+      renderSavedCrate();
+      $('#settingsModal').classList.remove('open');
+      toast('Cleared');
+    }
+  };
   $('#settingsModal').addEventListener('click',e=>{ if(e.target.id==='settingsModal') $('#settingsModal').classList.remove('open'); });
 
   // about
