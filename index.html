@@ -1699,11 +1699,18 @@ async function aiCall(system, user, maxTokens){
 
   if(prov==='gemini'){
     const u = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const genCfg = { maxOutputTokens:mt, temperature:0.8 };
+    // Gemini 2.5 models "think" by default and can spend the whole output budget on
+    // reasoning, returning EMPTY text. Disable thinking so tokens go to the answer.
+    if(/2\.5|thinking/i.test(model)) genCfg.thinkingConfig = { thinkingBudget: 0 };
     const r = await fetch(u,{ method:'POST', headers:{'content-type':'application/json'},
-      body:JSON.stringify({ systemInstruction:{parts:[{text:system}]}, contents:[{role:'user',parts:[{text:user}]}], generationConfig:{maxOutputTokens:mt, temperature:0.8} }) });
+      body:JSON.stringify({ systemInstruction:{parts:[{text:system}]}, contents:[{role:'user',parts:[{text:user}]}], generationConfig:genCfg }) });
     const j = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error('Gemini: '+((j.error&&j.error.message)||('HTTP '+r.status)));
-    return (((j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[]).map(p=>p.text||'').join(''));
+    const cand = (j.candidates && j.candidates[0]) || {};
+    const txt = ((cand.content && cand.content.parts) || []).map(p=>p.text||'').join('');
+    if(!txt && cand.finishReason) throw new Error('Gemini returned no text ('+cand.finishReason+') — try Gemini 2.0 Flash or raise the limit');
+    return txt;
   }
 
   // OpenAI-compatible: groq / openrouter / mistral
