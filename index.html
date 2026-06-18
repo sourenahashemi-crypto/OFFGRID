@@ -357,7 +357,7 @@
     <div class="tier-chips" id="tierChips">
       <span class="tier-chip on" title="Always available — runs fully in your browser"><span class="led"></span>Offline</span>
       <span class="tier-chip" id="chipLastfm" title="Add a Last.fm key in Settings"><span class="led"></span>Last.fm</span>
-      <span class="tier-chip" id="chipClaude" title="Add an Anthropic key in Settings"><span class="led"></span>Claude</span>
+      <span class="tier-chip" id="chipClaude" title="Add an AI engine key in Settings"><span class="led"></span><span id="chipAiLabel">AI</span></span>
     </div>
     <div class="top-actions">
       <button class="btn ghost sm" id="btnReset" style="display:none">↺ New file</button>
@@ -533,7 +533,7 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
         <label class="toggle on"><input type="checkbox" id="tgAdjacent" checked> Adjacent genres</label>
         <label class="toggle on"><input type="checkbox" id="tgLateral" checked> Lateral / deep cuts</label>
         <label class="toggle on"><input type="checkbox" id="tgListen" checked> ListenBrainz (free, no key)</label>
-        <label class="toggle"><input type="checkbox" id="tgClaude"> ✦ Use Claude (rank + reasons)</label>
+        <label class="toggle"><input type="checkbox" id="tgClaude"> ✦ Use AI (style-rank + reasons)</label>
       </div>
 
       <button class="btn primary" id="btnDiscover" style="width:100%;justify-content:center;font-size:15px;padding:13px">◈ Find what the algorithm won't show you</button>
@@ -578,22 +578,18 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
       </div>
 
       <div class="field">
-        <label>Anthropic API key <span style="color:var(--dim);font-weight:400">— Claude ranking, BPM/key enrichment &amp; explanations</span></label>
-        <div class="desc">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>. Used via direct browser calls (<code style="font-family:var(--mono);font-size:11px">anthropic-dangerous-direct-browser-access</code>). A full discovery run costs roughly a fraction of a cent.</div>
+        <label>AI engine <span style="color:var(--dim);font-weight:400">— infers your style, then ranks + explains the picks</span></label>
+        <div class="desc"><b>Gemini, Groq, OpenRouter &amp; Mistral all have free tiers</b>; Anthropic Claude is paid. Pick one, paste its key (stored only in this browser, called directly). <span id="aiSignup"></span></div>
+        <select id="aiProvider" style="margin-bottom:8px"></select>
         <div class="row">
-          <input type="password" id="keyClaude" placeholder="sk-ant-..." spellcheck="false" />
-          <button class="btn sm" id="testClaude">Test</button>
-          <span class="keystat idle" id="statClaude">—</span>
+          <input type="password" id="aiKey" placeholder="API key" spellcheck="false" />
+          <button class="btn sm" id="testAI">Test</button>
+          <span class="keystat idle" id="statAI">—</span>
         </div>
-      </div>
-
-      <div class="field">
-        <label>Claude model</label>
-        <select id="modelSelect">
-          <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced (recommended)</option>
-          <option value="claude-haiku-4-5-20251001">Haiku 4.5 — fastest &amp; cheapest</option>
-          <option value="claude-opus-4-8">Opus 4.8 — deepest reasoning</option>
-        </select>
+        <div class="row" style="margin-top:8px;align-items:center">
+          <span style="font-size:12.5px;color:var(--muted);white-space:nowrap;min-width:42px">Model</span>
+          <select id="aiModel" style="flex:1"></select>
+        </div>
       </div>
 
       <div class="field">
@@ -657,7 +653,8 @@ Also accepts a Rekordbox tab-separated TXT export (paste the whole thing, header
 --------------------------------------------------------------------------- */
 const LS = 'offgrid.v1';
 const state = {
-  keys: { lastfm:'', claude:'', discogs:'', model:'claude-sonnet-4-6', previews:false },
+  keys: { lastfm:'', claude:'', discogs:'', model:'claude-sonnet-4-6', previews:false,
+          aiProvider:'anthropic', aiKeys:{}, aiModels:{} },
   tracks: [],
   profile: null,
   results: [],
@@ -671,6 +668,13 @@ function loadKeys(){
     const s = JSON.parse(localStorage.getItem(LS) || '{}');
     Object.assign(state.keys, s.keys || {});
   }catch(e){}
+  // multi-provider AI: ensure containers + migrate the legacy single-Claude config
+  if(!state.keys.aiKeys || typeof state.keys.aiKeys!=='object') state.keys.aiKeys = {};
+  if(!state.keys.aiModels || typeof state.keys.aiModels!=='object') state.keys.aiModels = {};
+  if(state.keys.claude && !state.keys.aiKeys.anthropic) state.keys.aiKeys.anthropic = state.keys.claude;
+  if(state.keys.model && !state.keys.aiModels.anthropic) state.keys.aiModels.anthropic = state.keys.model;
+  if(!state.keys.aiProvider) state.keys.aiProvider = 'anthropic';
+  for(const p in AI_PROVIDERS) if(!state.keys.aiModels[p]) state.keys.aiModels[p] = AI_PROVIDERS[p].defaultModel;
 }
 function saveKeys(){
   try{ localStorage.setItem(LS, JSON.stringify({ keys: state.keys })); }catch(e){}
@@ -1566,17 +1570,41 @@ async function lbGet(url){
   cacheSet('offgrid.lb.', ck, j);
   return j;
 }
+// genre tags (only real MusicBrainz genres, count-weighted) from a LB top-recording entry
+function recGenreTags(rec){
+  const out={};
+  (rec.tags||[]).forEach(t=>{ if(t.genre_mbid && t.tag) out[t.tag.toLowerCase()] = (out[t.tag.toLowerCase()]||0) + (t.count||1); });
+  return out;
+}
+async function lbTopRecordings(mbid){
+  try{ return asArray(await lbGet(`https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/${mbid}`)); }
+  catch(e){ return []; }
+}
 async function listenbrainzCandidates(profile, opts, log){
   const tracks=[], explore=new Map();
   // seeds: user anchors first, then top-rated profile artists
   let seeds = (opts.anchors||[]).filter(a=>a.artist).map(a=>a.artist)
     .concat(profile.artists.map(a=>a.name)).filter(Boolean);
   seeds = [...new Set(seeds.map(s=>s.trim()).filter(Boolean))].slice(0,4);
+
+  // STYLE GATE: learn the DJ's genre lane from the seed artists' own tracks, so we can
+  // reject a similar artist's off-genre hits (e.g. Aphex Twin → Radiohead → "Karma Police").
+  const styleTags = new Map();
+  const seedMbids = {};
   for(const name of seeds){
-    log(`ListenBrainz · digging similar to ${name}`);
-    let mbid;
-    try{ mbid = await mbArtistMBID(name); }catch(e){ log('· '+e.message); continue; }
+    let mbid; try{ mbid = await mbArtistMBID(name); }catch(e){ continue; }
     if(!mbid) continue;
+    seedMbids[name] = mbid;
+    (await lbTopRecordings(mbid)).slice(0,10).forEach(rec=>{
+      const g = recGenreTags(rec); for(const k in g) styleTags.set(k, (styleTags.get(k)||0)+g[k]);
+    });
+  }
+  const styleSet = new Set([...styleTags.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([k])=>k));
+  if(styleSet.size) log(`ListenBrainz · your lane: ${[...styleSet].slice(0,5).join(', ')}`);
+
+  for(const name of seeds){
+    const mbid = seedMbids[name]; if(!mbid) continue;
+    log(`ListenBrainz · digging similar to ${name}`);
     let sims=[];
     try{ sims = await lbGet(`https://labs.api.listenbrainz.org/similar-artists/json?artist_mbids=${mbid}&algorithm=${LB_ALGO}`); }
     catch(e){ log('· '+e.message); continue; }
@@ -1585,20 +1613,29 @@ async function listenbrainzCandidates(profile, opts, log){
         && a.name.toLowerCase()!==name.toLowerCase()
         && !profile.existingArtists.has(a.name.toLowerCase())
         && !(opts.obscurity>=60 && MEGA.has(a.name.toLowerCase())))
-      .slice(0,6);
-    novel.forEach(a=>explore.set(a.name, Math.max(explore.get(a.name)||0, a.score||0)));
-    for(const a of novel.slice(0,3)){                              // strongest similars -> real tracks
-      let recs=[];
-      try{ recs = await lbGet(`https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/${a.artist_mbid}`); }catch(e){}
-      asArray(recs).slice(0,3).forEach(t=>{
-        if(t.artist_name && t.recording_name)
-          tracks.push({artist:t.artist_name, track:t.recording_name, match:0.6, source:'listenbrainz',
-                       seed:name, popularity:t.total_listen_count||0});
-      });
+      .slice(0,8);
+    for(const a of novel.slice(0,6)){                              // strongest similars -> real tracks
+      const recs = await lbTopRecordings(a.artist_mbid);
+      let perArtist=0;
+      for(const t of recs){
+        if(perArtist>=3) break;                                    // cap per artist → spread the crate
+        if(!t.artist_name || !t.recording_name) continue;
+        const g = recGenreTags(t), tags = Object.keys(g);
+        let sub='';
+        if(styleSet.size){                                         // genre gate: keep only in-lane recordings
+          const overlap = tags.filter(x=>styleSet.has(x));
+          if(!overlap.length) continue;                           // off-style → drop
+          sub = overlap.sort((x,y)=>g[y]-g[x])[0];
+        } else { sub = tags.sort((x,y)=>g[y]-g[x])[0] || ''; }
+        tracks.push({artist:t.artist_name, track:t.recording_name, match:0.6, source:'listenbrainz',
+                     seed:name, subgenre:sub, popularity:t.total_listen_count||0});
+        perArtist++;
+      }
+      if(perArtist>0) explore.set(a.name, Math.max(explore.get(a.name)||0, a.score||0));
       await sleep(120);
     }
   }
-  // surface the similar artists in the "Artists to explore" rail (merged with Last.fm's)
+  // surface the in-lane similar artists in the "Artists to explore" rail (merged with Last.fm's)
   const seen = new Set(state.exploreArtists.map(a=>a.name.toLowerCase()));
   Array.from(explore.entries()).sort((a,b)=>b[1]-a[1]).slice(0,16).forEach(([name,score])=>{
     if(!seen.has(name.toLowerCase())) state.exploreArtists.push({name, match:Math.min(1,(score||0)/8000)});
@@ -1620,26 +1657,65 @@ function dedupeCandidates(list, profile, opts){
   return out.sort((a,b)=>(b.match||0)-(a.match||0));
 }
 
-// ---- Claude ----
-async function claudeCall(system, user, maxTokens){
-  const r = await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{
-      'content-type':'application/json',
-      'x-api-key':state.keys.claude,
-      'anthropic-version':'2023-06-01',
-      'anthropic-dangerous-direct-browser-access':'true',
-    },
-    body:JSON.stringify({
-      model:state.keys.model||'claude-sonnet-4-6',
-      max_tokens:maxTokens||3000,
-      system,
-      messages:[{role:'user',content:user}],
-    }),
-  });
+// ---- AI engines (multi-provider, all CORS-verified callable from the browser) ----
+const AI_PROVIDERS = {
+  anthropic:  { label:'Anthropic Claude (paid)', short:'Claude',     free:false, keyHint:'sk-ant-...',
+                signup:'https://console.anthropic.com/settings/keys',
+                models:['claude-sonnet-4-6','claude-haiku-4-5-20251001','claude-opus-4-8'], defaultModel:'claude-sonnet-4-6' },
+  gemini:     { label:'Google Gemini (free tier)', short:'Gemini',   free:true,  keyHint:'AIza...',
+                signup:'https://aistudio.google.com/apikey',
+                models:['gemini-2.0-flash','gemini-2.5-flash','gemini-2.0-flash-lite'], defaultModel:'gemini-2.0-flash' },
+  groq:       { label:'Groq (free, fast)', short:'Groq',             free:true,  keyHint:'gsk_...',
+                signup:'https://console.groq.com/keys',
+                models:['llama-3.3-70b-versatile','llama-3.1-8b-instant'], defaultModel:'llama-3.3-70b-versatile' },
+  openrouter: { label:'OpenRouter (free models)', short:'OpenRouter', free:true, keyHint:'sk-or-...',
+                signup:'https://openrouter.ai/keys',
+                models:['meta-llama/llama-3.3-70b-instruct:free','deepseek/deepseek-chat-v3.1:free','google/gemini-2.0-flash-exp:free'], defaultModel:'meta-llama/llama-3.3-70b-instruct:free' },
+  mistral:    { label:'Mistral (free tier)', short:'Mistral',        free:true,  keyHint:'API key',
+                signup:'https://console.mistral.ai/api-keys',
+                models:['mistral-small-latest','open-mistral-nemo','mistral-large-latest'], defaultModel:'mistral-small-latest' },
+};
+const OAI_BASE = { groq:'https://api.groq.com/openai/v1', openrouter:'https://openrouter.ai/api/v1', mistral:'https://api.mistral.ai/v1' };
+
+function aiProvider(){ return state.keys.aiProvider || 'anthropic'; }
+function aiKey(p){ p=p||aiProvider(); return (state.keys.aiKeys && state.keys.aiKeys[p]) || ''; }
+function aiModel(p){ p=p||aiProvider(); return (state.keys.aiModels && state.keys.aiModels[p]) || (AI_PROVIDERS[p]||{}).defaultModel || ''; }
+function aiReady(){ return !!aiKey(); }
+function aiShort(){ return (AI_PROVIDERS[aiProvider()]||{}).short || 'AI'; }
+
+// generic chat call → returns text. Dispatches by provider; all verified CORS-callable.
+async function aiCall(system, user, maxTokens){
+  const prov = aiProvider(), key = aiKey(), model = aiModel(), mt = maxTokens || 3000;
+  if(!key) throw new Error(aiShort()+': add an API key in Settings');
+
+  if(prov==='anthropic'){
+    const r = await fetch('https://api.anthropic.com/v1/messages',{ method:'POST',
+      headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({ model, max_tokens:mt, system, messages:[{role:'user',content:user}] }) });
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error('Claude: '+((j.error&&j.error.message)||('HTTP '+r.status)));
+    return (j.content||[]).map(b=>b.text||'').join('');
+  }
+
+  if(prov==='gemini'){
+    const u = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+    const r = await fetch(u,{ method:'POST', headers:{'content-type':'application/json'},
+      body:JSON.stringify({ systemInstruction:{parts:[{text:system}]}, contents:[{role:'user',parts:[{text:user}]}], generationConfig:{maxOutputTokens:mt, temperature:0.8} }) });
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error('Gemini: '+((j.error&&j.error.message)||('HTTP '+r.status)));
+    return (((j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[]).map(p=>p.text||'').join(''));
+  }
+
+  // OpenAI-compatible: groq / openrouter / mistral
+  const base = OAI_BASE[prov];
+  if(!base) throw new Error('Unknown AI provider: '+prov);
+  const headers = {'content-type':'application/json', authorization:'Bearer '+key};
+  if(prov==='openrouter'){ headers['HTTP-Referer']='https://offgrid.app'; headers['X-Title']='OFFGRID'; }
+  const r = await fetch(base+'/chat/completions',{ method:'POST', headers,
+    body:JSON.stringify({ model, max_tokens:mt, temperature:0.8, messages:[{role:'system',content:system},{role:'user',content:user}] }) });
   const j = await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error('Claude: '+((j.error&&j.error.message)||('HTTP '+r.status)));
-  return (j.content||[]).map(b=>b.text||'').join('');
+  if(!r.ok) throw new Error((AI_PROVIDERS[prov].short)+': '+((j.error&&j.error.message)||j.detail||('HTTP '+r.status)));
+  return (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content) || '';
 }
 function extractJSON(text){
   let t = text.trim();
@@ -1648,7 +1724,7 @@ function extractJSON(text){
   if(s>=0 && e>s){ try{ return JSON.parse(t.slice(s,e+1)); }catch(err){} }
   const so=t.indexOf('{'), eo=t.lastIndexOf('}');
   if(so>=0 && eo>so){ try{ const o=JSON.parse(t.slice(so,eo+1)); return o.recommendations||o.results||o.tracks||[]; }catch(err){} }
-  throw new Error('Claude returned unparseable output.');
+  throw new Error('The AI returned unparseable output — try again or pick another engine.');
 }
 
 function profileForLLM(p){
@@ -1664,11 +1740,13 @@ function profileForLLM(p){
   };
 }
 
-async function claudeRank(profile, pool, opts, log){
+async function aiRank(profile, pool, opts, log){
   const want = opts.count;
+  const seedList = (opts.anchors&&opts.anchors.length)
+    ? opts.anchors.map(a=>`${a.artist}${a.track?' – '+a.track:''}`)
+    : profile.artists.slice(0,12).map(a=>a.name);
   const cachePayload = {
-    model: state.keys.model||'claude-sonnet-4-6',
-    want,
+    provider: aiProvider(), model: aiModel(), want,
     profile: profileForLLM(profile),
     anchors: opts.anchors||[],
     effBpm: opts.effBpm||null,
@@ -1676,32 +1754,31 @@ async function claudeRank(profile, pool, opts, log){
     pool: pool.map(c=>[c.artist,c.track,c.source,Math.round((c.match||0)*100)]),
   };
   const cKey = hashString(JSON.stringify(cachePayload));
-  const cached = cacheGet('offgrid.claude.', cKey, 432e5);
+  const cached = cacheGet('offgrid.ai.', cKey, 432e5);
   if(cached) return cached;
 
   const pocketNote = opts.pocketFamilies && opts.pocketFamilies.size
-    ? `The DJ is focusing on these taste pockets right now: ${[...opts.pocketFamilies].join(', ')}. Stay inside that lane.` : '';
-  const sys = `You are a world-class DJ and crate-digging A&R with encyclopedic knowledge of electronic and dance music. You help DJs ESCAPE algorithmic feeds by recommending deep, mixable, NON-OBVIOUS tracks from smaller/newer artists. You NEVER recommend mainstream chart names or the DJ's existing artists. You ground picks in real, findable releases and reason about tempo + harmonic (Camelot) mixability. Return STRICT JSON only — no prose, no markdown.`;
+    ? `The DJ is focusing on these taste pockets right now: ${[...opts.pocketFamilies].join(', ')}. Stay strictly inside that lane.` : '';
+  const sys = `You are a world-class DJ and crate-digging A&R with encyclopedic knowledge of electronic and dance music. You help DJs ESCAPE algorithmic feeds by recommending deep, mixable, NON-OBVIOUS tracks from smaller/newer artists. Your #1 job is STYLE FIT: first infer the DJ's precise sub-genre(s), tempo character and mood from their seed tracks/artists, then recommend ONLY tracks that a DJ in that exact lane would actually mix. NEVER cross into unrelated genres (e.g. if the seeds are techno/house, do NOT suggest rock, pop, indie, hip-hop, ambient-for-listening, or a dance artist's mainstream radio hit). NEVER recommend mainstream chart names or the DJ's existing artists. Ground every pick in a real, findable release and reason about tempo + harmonic (Camelot) mixability. Return STRICT JSON only — no prose, no markdown.`;
 
   const poolText = pool.length
-    ? `Candidate pool from Last.fm collaborative filtering + adjacent-genre charts, already filtered for novelty/obscurity (artist | track | source | match 0..1):\n` +
+    ? `Candidate pool from collaborative filtering + adjacent-genre charts, already filtered for novelty/obscurity (artist | track | source | match 0..1). Some of these may be OFF-STYLE — discard any that don't fit the inferred lane:\n` +
       pool.slice(0,35).map(c=>`- ${c.artist} | ${c.track} | ${c.source} | ${(c.match||0).toFixed(2)}`).join('\n')
-    : `No external candidate pool — propose tracks from your own knowledge of real, lesser-known releases.`;
+    : `No external candidate pool — propose tracks from your own knowledge of real, lesser-known releases in the DJ's exact style.`;
 
-  const anchorText = (opts.anchors&&opts.anchors.length)
-    ? `\n\n<taste_anchors>\nThese are the BULLSEYE of the DJ's taste — weight them heavily, match their sonic signature:\n${opts.anchors.map(a=>`- ${a.artist}${a.track?' – '+a.track:''}`).join('\n')}\n</taste_anchors>` : '';
+  const anchorText = `\n\n<seed_tracks>\nThese ARE the DJ's taste — infer the exact style/sub-genre/tempo from them and match it tightly:\n${seedList.map(s=>`- ${s}`).join('\n')}\n</seed_tracks>`;
 
-  const user = `<dj_profile>\n${JSON.stringify(profileForLLM(profile),null,2)}\n</dj_profile>${anchorText}\n\n<candidate_pool>\n${poolText}\n</candidate_pool>\n\n<instructions>\nReturn the ${want} best picks this DJ likely does NOT know but would love. ${pocketNote}\nRules:\n1. Prefer pool candidates; you may ADD up to ${Math.ceil(want*0.4)} lateral picks from your own knowledge (mark source "lateral") — genuinely under-the-radar, recent where possible.\n2. HARD RULE: no mainstream/chart names (e.g. Anyma, ARTBAT, Tale of Us, Adriatique, Massano, CamelPhat, Vintage Culture, Solomun) and nothing by the DJ's listed top artists. Favor small labels and deep cuts.\n3. Stay within tempo window ${JSON.stringify(opts.effBpm||[Math.round(profile.bpm.p25),Math.round(profile.bpm.p75)])} BPM (½/×2 ok — note it).\n4. Favor harmonic compatibility with dominant keys ${JSON.stringify(profile.topCamelot.map(k=>k.name))}.\n5. For EVERY pick estimate bpm (number) and camelot key (e.g. "8A").\n6. ONE punchy reason per pick tying it to their taste/anchors.\n</instructions>\n\nReturn STRICT JSON array, each item: {"artist":string,"track":string,"bpm":number,"camelot":string,"subgenre":string,"source":"similar"|"adjacent"|"lateral"|"label","reason":string,"confidence":0..1}. No other text.`;
+  const user = `<dj_profile>\n${JSON.stringify(profileForLLM(profile),null,2)}\n</dj_profile>${anchorText}\n\n<candidate_pool>\n${poolText}\n</candidate_pool>\n\n<instructions>\nFirst, in your head, name the DJ's core sub-genre(s) and tempo/key character from the seeds. Then return the ${want} best picks this DJ likely does NOT know but would love. ${pocketNote}\nRules:\n1. STYLE FIT IS MANDATORY: every pick must be the SAME or an immediately-adjacent sub-genre as the seeds, and DJ-mixable. Reject anything off-style even if it's in the pool.\n2. Prefer pool candidates; you may ADD up to ${Math.ceil(want*0.4)} lateral picks from your own knowledge (mark source "lateral") — genuinely under-the-radar, recent where possible, in-style.\n3. HARD RULE: no mainstream/chart names (e.g. Anyma, ARTBAT, Tale of Us, Adriatique, Massano, CamelPhat, Vintage Culture, Solomun) and nothing by the DJ's listed top artists. Favor small labels and deep cuts.\n4. Stay within tempo window ${JSON.stringify(opts.effBpm||[Math.round(profile.bpm.p25)||0,Math.round(profile.bpm.p75)||0])} BPM when known (½/×2 ok — note it).\n5. For EVERY pick estimate bpm (number) and camelot key (e.g. "8A") so it's mixable.\n6. ONE punchy reason per pick that names the shared sub-genre / why it fits the seeds.\n</instructions>\n\nReturn STRICT JSON array, each item: {"artist":string,"track":string,"bpm":number,"camelot":string,"subgenre":string,"source":"similar"|"adjacent"|"lateral"|"label"|"listenbrainz","reason":string,"confidence":0..1}. No other text.`;
 
-  log('Claude · ranking & enriching the shortlist…');
-  const out = await claudeCall(sys, user, Math.min(4000, 1200 + want*80));
+  log(aiShort()+' · style-matching & ranking the shortlist…');
+  const out = await aiCall(sys, user, Math.min(4000, 1200 + want*80));
   const ranked = extractJSON(out).map(r=>({
     artist:r.artist, track:r.track,
     bpm:Number(r.bpm)||0, camelot:(r.camelot||'').toUpperCase(),
     subgenre:r.subgenre||'', source:r.source||'lateral',
     reason:r.reason||'', match:typeof r.confidence==='number'?r.confidence:0.7,
   })).filter(r=>r.artist&&r.track);
-  cacheSet('offgrid.claude.', cKey, ranked);
+  cacheSet('offgrid.ai.', cKey, ranked);
   return ranked;
 }
 
@@ -1761,19 +1838,19 @@ async function runDiscovery(){
     state.lastPoolSize = pool.length;
 
     let results;
-    const useClaude = opts.useClaude && state.keys.claude;
-    if(useClaude){
+    const useAI = opts.useClaude && aiReady();
+    if(useAI){
       const shortlist = pool.slice(0, Math.min(35, Math.max(opts.count, 20)));   // tokens scale with the shortlist, not the universe
-      log(`Claude · ranking ${shortlist.length || 'fresh'} qualified picks…`);
-      results = await claudeRank(p, shortlist, opts, log);
+      log(`${aiShort()} · style-matching ${shortlist.length || 'fresh'} qualified picks…`);
+      results = await aiRank(p, shortlist, opts, log);
     } else if(pool.length){
       // token-free tier: present the qualified Last.fm candidates directly
       results = pool.slice(0, opts.count).map(c=>({
         artist:c.artist, track:c.track, bpm:0, camelot:'',
-        subgenre:c.tag||c.label||'', source:c.source,
+        subgenre:c.subgenre||c.tag||c.label||'', source:c.source,
         reason: c.source==='similar' ? `Listeners of ${c.seed?('“'+c.seed+'”'):'your tracks'} also play this — different signal than your feed.`
               : c.source==='adjacent' ? `Top track in “${c.tag}”, one step sideways from your core.`
-              : c.source==='listenbrainz' ? `ListenBrainz open-data CF: fans of ${c.seed?esc(c.seed):'your artists'} dig this — orthogonal to your feed.`
+              : c.source==='listenbrainz' ? `ListenBrainz CF: fans of ${c.seed?esc(c.seed):'your artists'} dig this${c.subgenre?(' — '+esc(c.subgenre)):''}, in your lane.`
               : c.label ? `On ${c.label}, a label you rate — crate digging.` : `Collaborative-filtering match.`,
         match:c.match||0.5,
       }));
@@ -2048,9 +2125,9 @@ function renderSavedCrate(){
 =========================================================================== */
 function renderResults(results, p, opts, logs){
   const area=$('#resultsArea');
-  const usedClaude = opts.useClaude && state.keys.claude;
+  const usedAI = opts.useClaude && aiReady();
   const srcNames = [state.keys.lastfm&&'Last.fm', opts.listenbrainz&&'ListenBrainz', state.keys.discogs&&'Discogs'].filter(Boolean).join(' + ');
-  const tier = usedClaude ? 'Claude · ranked '+(srcNames?`${state.lastPoolSize} qualified candidates`:'from profile')
+  const tier = usedAI ? aiShort()+' · style-ranked '+(srcNames?`${state.lastPoolSize} qualified candidates`:'from profile')
              : srcNames ? `${srcNames} · ${state.lastPoolSize} qualified candidates · token-free`
              : 'Offline starting points';
 
@@ -2181,22 +2258,24 @@ function downloadCSV(results){
 =========================================================================== */
 function updateTierChips(){
   $('#chipLastfm').classList.toggle('on', !!state.keys.lastfm);
-  $('#chipClaude').classList.toggle('on', !!state.keys.claude);
+  $('#chipClaude').classList.toggle('on', aiReady());
+  const lbl=$('#chipAiLabel'); if(lbl) lbl.textContent = aiShort();
 }
 function updateEngineNote(){
   const n=$('#engineNote'); if(!n) return;
-  const claude=!!state.keys.claude, lf=!!state.keys.lastfm, dg=!!state.keys.discogs;
+  const ai=aiReady(), lf=!!state.keys.lastfm, dg=!!state.keys.discogs, aiName=aiShort();
   const lb=$('#tgListen')?$('#tgListen').checked:false;
   const useC=$('#tgClaude')?$('#tgClaude').checked:false;
   const focus = state.selectedPockets.size ? ` · focused on ${[...state.selectedPockets].join(' + ')}` : '';
   const all = [lf&&'Last.fm', lb&&'ListenBrainz', dg&&'Discogs'].filter(Boolean).join(' + ');
   const free = [lb&&'ListenBrainz', dg&&'Discogs'].filter(Boolean).join(' + ');
   let s;
-  if(useC && claude) s = all ? `Free shortlist (${all}) → Claude ranks & explains only the qualified picks. Token-thrifty by design.`
-                            : 'Claude proposes from your profile. Keep ListenBrainz on (free) or add Last.fm to ground picks & save tokens.';
-  else if(lf) s = `Token-free: ${all} filtered to your pockets, tempo, keys & obscurity. Flip “Use Claude” on to rank + explain the shortlist.`;
-  else if(free) s = `Free, no key: ${free} collaborative-filtering discovery — real picks with zero keys. Add a Last.fm key or Claude for deeper ranking.`;
-  else s = 'Offline: taste analysis + smart search links. Keep ListenBrainz on (it’s free, no key) or add a Last.fm key for real discovery.';
+  if(useC && ai) s = all ? `Free shortlist (${all}) → ${aiName} infers your style, then ranks & explains only the in-lane picks.`
+                         : `${aiName} proposes from your profile. Keep ListenBrainz on (free) or add Last.fm to ground picks.`;
+  else if(useC && !ai) s = `Pick an AI engine + add its key in ⚙ Settings to style-rank (Gemini, Groq, OpenRouter & Mistral have free tiers).`;
+  else if(lf) s = `Token-free: ${all} filtered to your pockets, tempo, keys & obscurity. Flip “Use AI” on to style-rank the shortlist.`;
+  else if(free) s = `Free, no key: ${free} collaborative-filtering discovery. Add an AI engine (free tiers available) to style-rank.`;
+  else s = 'Offline: taste analysis + smart search links. Keep ListenBrainz on (free, no key) or add a Last.fm key for real discovery.';
   n.textContent = s + focus;
 }
 
@@ -2265,11 +2344,36 @@ async function testLastfm(){
   try{ await lfm('artist.getSimilar',{artist:'Aphex Twin',limit:1,autocorrect:1}); s.className='keystat ok'; s.textContent='✓ valid'; }
   catch(e){ s.className='keystat bad'; s.textContent='✗ '+e.message.slice(0,28); }
 }
-async function testClaude(){
-  const s=$('#statClaude'); state.keys.claude=$('#keyClaude').value.trim(); state.keys.model=$('#modelSelect').value;
-  if(!state.keys.claude){ s.className='keystat idle'; s.textContent='—'; return; }
+// ---- AI engine selector UI ----
+function fillAiProviderUI(){
+  const sel=$('#aiProvider'); if(!sel) return;
+  sel.innerHTML = Object.entries(AI_PROVIDERS).map(([k,v])=>`<option value="${k}">${esc(v.label)}</option>`).join('');
+  sel.value = aiProvider();
+  syncAiFields();
+}
+function captureAiField(){            // remember what's typed for the currently-selected provider
+  const sel=$('#aiProvider'); if(!sel) return;
+  const p=sel.value;
+  state.keys.aiKeys[p]=$('#aiKey').value.trim();
+  state.keys.aiModels[p]=$('#aiModel').value;
+}
+function syncAiFields(){
+  const sel=$('#aiProvider'); if(!sel) return;
+  const p=sel.value, def=AI_PROVIDERS[p]||{};
+  state.keys.aiProvider=p;
+  const key=$('#aiKey'); key.value=state.keys.aiKeys[p]||''; key.placeholder=def.keyHint||'API key';
+  const m=$('#aiModel'); m.innerHTML=(def.models||[]).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  m.value=state.keys.aiModels[p]||def.defaultModel||'';
+  $('#aiSignup').innerHTML = def.signup
+    ? `Get a key: <a href="${def.signup}" target="_blank">${esc(def.signup.replace(/^https?:\/\//,''))}</a> · <b style="color:${def.free?'var(--accent)':'var(--warn)'}">${def.free?'free tier':'paid'}</b>` : '';
+  const st=$('#statAI'); st.className='keystat idle'; st.textContent=def.free?'free tier':'—';
+}
+async function testAI(){
+  captureAiField();
+  const s=$('#statAI');
+  if(!aiKey()){ s.className='keystat idle'; s.textContent='—'; return; }
   s.className='keystat idle'; s.textContent='testing…';
-  try{ await claudeCall('Reply with OK.','Say OK',16); s.className='keystat ok'; s.textContent='✓ valid'; }
+  try{ await aiCall('Reply with the single word OK.','Say OK',16); s.className='keystat ok'; s.textContent='✓ valid'; }
   catch(e){ s.className='keystat bad'; s.textContent='✗ '+e.message.slice(0,30); }
 }
 async function testDiscogs(){
@@ -2291,19 +2395,20 @@ async function testDiscogs(){
 
 function openSettings(){
   $('#keyLastfm').value=state.keys.lastfm;
-  $('#keyClaude').value=state.keys.claude;
   $('#keyDiscogs').value=state.keys.discogs;
-  $('#modelSelect').value=state.keys.model||'claude-sonnet-4-6';
   $('#keyPreviews').checked=!!state.keys.previews;
+  fillAiProviderUI();
   $('#settingsModal').classList.add('open');
 }
 function applyPreviewPref(){ document.body.classList.toggle('previews-on', !!state.keys.previews); }
 function saveSettings(){
+  captureAiField();
   state.keys.lastfm=$('#keyLastfm').value.trim();
-  state.keys.claude=$('#keyClaude').value.trim();
   state.keys.discogs=$('#keyDiscogs').value.trim();
-  state.keys.model=$('#modelSelect').value;
   state.keys.previews=$('#keyPreviews').checked;
+  // keep the legacy fields mirrored so nothing downstream breaks
+  state.keys.claude=state.keys.aiKeys.anthropic||'';
+  state.keys.model=state.keys.aiModels.anthropic||'claude-sonnet-4-6';
   saveKeys(); updateTierChips(); updateEngineNote(); applyPreviewPref();
   $('#settingsModal').classList.remove('open');
   toast('Settings saved');
@@ -2358,14 +2463,21 @@ function wire(){
   $('#closeSettings').onclick=()=>$('#settingsModal').classList.remove('open');
   $('#saveSettings').onclick=saveSettings;
   $('#testLastfm').onclick=testLastfm;
-  $('#testClaude').onclick=testClaude;
+  $('#testAI').onclick=testAI;
   $('#testDiscogs').onclick=testDiscogs;
+  // AI engine: swap fields on provider change, remember typed key/model per provider
+  if($('#aiProvider')){
+    $('#aiProvider').onchange=syncAiFields;
+    $('#aiKey').addEventListener('input',captureAiField);
+    $('#aiModel').addEventListener('change',captureAiField);
+  }
   $('#clearData').onclick=()=>{
     if(confirm('Remove all stored API keys + cached discovery data from this browser?')){
       Object.keys(localStorage)
-        .filter(k=>k===LS||k==='offgrid.crate.v1'||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.')||k.startsWith('offgrid.itunes.')||k.startsWith('offgrid.mb.')||k.startsWith('offgrid.lb.'))
+        .filter(k=>k===LS||k==='offgrid.crate.v1'||k.startsWith('offgrid.lfm.')||k.startsWith('offgrid.discogs.')||k.startsWith('offgrid.claude.')||k.startsWith('offgrid.ai.')||k.startsWith('offgrid.itunes.')||k.startsWith('offgrid.mb.')||k.startsWith('offgrid.lb.'))
         .forEach(k=>localStorage.removeItem(k));
-      state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6',previews:false};
+      state.keys={lastfm:'',claude:'',discogs:'',model:'claude-sonnet-4-6',previews:false,aiProvider:'anthropic',aiKeys:{},aiModels:{}};
+      for(const p in AI_PROVIDERS) state.keys.aiModels[p]=AI_PROVIDERS[p].defaultModel;
       state.savedCrate=[];
       updateTierChips();
       updateEngineNote();
