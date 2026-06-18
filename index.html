@@ -1570,17 +1570,41 @@ async function lbGet(url){
   cacheSet('offgrid.lb.', ck, j);
   return j;
 }
+// genre tags (only real MusicBrainz genres, count-weighted) from a LB top-recording entry
+function recGenreTags(rec){
+  const out={};
+  (rec.tags||[]).forEach(t=>{ if(t.genre_mbid && t.tag) out[t.tag.toLowerCase()] = (out[t.tag.toLowerCase()]||0) + (t.count||1); });
+  return out;
+}
+async function lbTopRecordings(mbid){
+  try{ return asArray(await lbGet(`https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/${mbid}`)); }
+  catch(e){ return []; }
+}
 async function listenbrainzCandidates(profile, opts, log){
   const tracks=[], explore=new Map();
   // seeds: user anchors first, then top-rated profile artists
   let seeds = (opts.anchors||[]).filter(a=>a.artist).map(a=>a.artist)
     .concat(profile.artists.map(a=>a.name)).filter(Boolean);
   seeds = [...new Set(seeds.map(s=>s.trim()).filter(Boolean))].slice(0,4);
+
+  // STYLE GATE: learn the DJ's genre lane from the seed artists' own tracks, so we can
+  // reject a similar artist's off-genre hits (e.g. Aphex Twin → Radiohead → "Karma Police").
+  const styleTags = new Map();
+  const seedMbids = {};
   for(const name of seeds){
-    log(`ListenBrainz · digging similar to ${name}`);
-    let mbid;
-    try{ mbid = await mbArtistMBID(name); }catch(e){ log('· '+e.message); continue; }
+    let mbid; try{ mbid = await mbArtistMBID(name); }catch(e){ continue; }
     if(!mbid) continue;
+    seedMbids[name] = mbid;
+    (await lbTopRecordings(mbid)).slice(0,10).forEach(rec=>{
+      const g = recGenreTags(rec); for(const k in g) styleTags.set(k, (styleTags.get(k)||0)+g[k]);
+    });
+  }
+  const styleSet = new Set([...styleTags.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([k])=>k));
+  if(styleSet.size) log(`ListenBrainz · your lane: ${[...styleSet].slice(0,5).join(', ')}`);
+
+  for(const name of seeds){
+    const mbid = seedMbids[name]; if(!mbid) continue;
+    log(`ListenBrainz · digging similar to ${name}`);
     let sims=[];
     try{ sims = await lbGet(`https://labs.api.listenbrainz.org/similar-artists/json?artist_mbids=${mbid}&algorithm=${LB_ALGO}`); }
     catch(e){ log('· '+e.message); continue; }
@@ -1589,20 +1613,29 @@ async function listenbrainzCandidates(profile, opts, log){
         && a.name.toLowerCase()!==name.toLowerCase()
         && !profile.existingArtists.has(a.name.toLowerCase())
         && !(opts.obscurity>=60 && MEGA.has(a.name.toLowerCase())))
-      .slice(0,6);
-    novel.forEach(a=>explore.set(a.name, Math.max(explore.get(a.name)||0, a.score||0)));
-    for(const a of novel.slice(0,3)){                              // strongest similars -> real tracks
-      let recs=[];
-      try{ recs = await lbGet(`https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/${a.artist_mbid}`); }catch(e){}
-      asArray(recs).slice(0,3).forEach(t=>{
-        if(t.artist_name && t.recording_name)
-          tracks.push({artist:t.artist_name, track:t.recording_name, match:0.6, source:'listenbrainz',
-                       seed:name, popularity:t.total_listen_count||0});
-      });
+      .slice(0,8);
+    for(const a of novel.slice(0,6)){                              // strongest similars -> real tracks
+      const recs = await lbTopRecordings(a.artist_mbid);
+      let perArtist=0;
+      for(const t of recs){
+        if(perArtist>=3) break;                                    // cap per artist → spread the crate
+        if(!t.artist_name || !t.recording_name) continue;
+        const g = recGenreTags(t), tags = Object.keys(g);
+        let sub='';
+        if(styleSet.size){                                         // genre gate: keep only in-lane recordings
+          const overlap = tags.filter(x=>styleSet.has(x));
+          if(!overlap.length) continue;                           // off-style → drop
+          sub = overlap.sort((x,y)=>g[y]-g[x])[0];
+        } else { sub = tags.sort((x,y)=>g[y]-g[x])[0] || ''; }
+        tracks.push({artist:t.artist_name, track:t.recording_name, match:0.6, source:'listenbrainz',
+                     seed:name, subgenre:sub, popularity:t.total_listen_count||0});
+        perArtist++;
+      }
+      if(perArtist>0) explore.set(a.name, Math.max(explore.get(a.name)||0, a.score||0));
       await sleep(120);
     }
   }
-  // surface the similar artists in the "Artists to explore" rail (merged with Last.fm's)
+  // surface the in-lane similar artists in the "Artists to explore" rail (merged with Last.fm's)
   const seen = new Set(state.exploreArtists.map(a=>a.name.toLowerCase()));
   Array.from(explore.entries()).sort((a,b)=>b[1]-a[1]).slice(0,16).forEach(([name,score])=>{
     if(!seen.has(name.toLowerCase())) state.exploreArtists.push({name, match:Math.min(1,(score||0)/8000)});
@@ -1814,10 +1847,10 @@ async function runDiscovery(){
       // token-free tier: present the qualified Last.fm candidates directly
       results = pool.slice(0, opts.count).map(c=>({
         artist:c.artist, track:c.track, bpm:0, camelot:'',
-        subgenre:c.tag||c.label||'', source:c.source,
+        subgenre:c.subgenre||c.tag||c.label||'', source:c.source,
         reason: c.source==='similar' ? `Listeners of ${c.seed?('“'+c.seed+'”'):'your tracks'} also play this — different signal than your feed.`
               : c.source==='adjacent' ? `Top track in “${c.tag}”, one step sideways from your core.`
-              : c.source==='listenbrainz' ? `ListenBrainz open-data CF: fans of ${c.seed?esc(c.seed):'your artists'} dig this — orthogonal to your feed.`
+              : c.source==='listenbrainz' ? `ListenBrainz CF: fans of ${c.seed?esc(c.seed):'your artists'} dig this${c.subgenre?(' — '+esc(c.subgenre)):''}, in your lane.`
               : c.label ? `On ${c.label}, a label you rate — crate digging.` : `Collaborative-filtering match.`,
         match:c.match||0.5,
       }));

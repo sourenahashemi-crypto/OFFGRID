@@ -97,7 +97,9 @@ Engagement-optimised feeds reinforce what you already play. OFFGRID deliberately
 2. **ListenBrainz + MusicBrainz collaborative filtering** (free, **no key**) — MetaBrainz open-data
    "fans of artist X also play Y", an independent CF signal. Your top artists are resolved to
    MusicBrainz IDs, ListenBrainz returns similar artists, and each one's top recordings become
-   real, mixable candidates. Works with zero keys, so OFFGRID does genuine discovery out of the box.
+   real, mixable candidates. A **genre-tag style gate** first learns your lane from your seeds'
+   genre tags, then drops any similar-artist track whose genre doesn't match — so a techno seed
+   never drifts into that artist's mainstream rock hit. Works with zero keys.
 3. **Label-mate digging** (Discogs, optional) — other artists on labels you rate.
 4. **Adjacent-subgenre exploration** — one curated step sideways from your core genres.
 5. **Style-locked AI picks** (your chosen engine) — the AI infers your exact sub-genre/tempo from the seeds and adds in-lane tastemaker deep cuts that pure similarity graphs miss, while rejecting off-style or mainstream candidates.
