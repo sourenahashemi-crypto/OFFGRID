@@ -2409,9 +2409,14 @@ function saveSettings(){
   // keep the legacy fields mirrored so nothing downstream breaks
   state.keys.claude=state.keys.aiKeys.anthropic||'';
   state.keys.model=state.keys.aiModels.anthropic||'claude-sonnet-4-6';
-  saveKeys(); updateTierChips(); updateEngineNote(); applyPreviewPref();
+  saveKeys(); updateTierChips(); syncAiToggle(); updateEngineNote(); applyPreviewPref();
   $('#settingsModal').classList.remove('open');
-  toast('Settings saved');
+  toast(aiReady() ? `Saved — ${aiShort()} AI is on for discovery` : 'Settings saved');
+}
+// adding an AI key should actually USE it — auto-enable the "Use AI" toggle
+function syncAiToggle(){
+  const cb=$('#tgClaude'); if(!cb) return;
+  if(aiReady() && !cb.checked){ cb.checked=true; const w=cb.closest('.toggle'); if(w) w.classList.add('on'); }
 }
 
 function wire(){
@@ -2518,6 +2523,8 @@ updateTierChips();
 applyPreviewPref();
 updateCrateCount();
 wire();
+syncAiToggle();        // if an AI key is already saved, use it by default
+updateEngineNote();
 renderSavedCrate();
 </script>
 </body>
