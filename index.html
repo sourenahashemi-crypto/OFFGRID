@@ -1906,6 +1906,7 @@ function readOpts(){
 function bpmInWindow(bpm, p, opts){
   if(!bpm) return true;                                  // unknown bpm passes (Last.fm tier)
   const win = (opts && opts.effBpm) || [p.bpm.p25, p.bpm.p75];   // pocket window if focused
+  if(!(win[0]>0) && !(win[1]>0)) return true;            // no tempo data in the profile → can't filter, don't drop
   const lo=win[0]-opts.bpmTol, hi=win[1]+opts.bpmTol;
   const test = b => b>=lo && b<=hi;
   if(test(bpm)) return true;
@@ -1915,6 +1916,7 @@ function bpmInWindow(bpm, p, opts){
 function keyCompatible(cam, p, opts){
   if(!cam || !/^\d{1,2}[AB]$/.test(cam)) return true;     // unknown key passes
   const set = (opts && opts.effKeys) || p.compatSet;     // pocket key-set if focused
+  if(!set || !set.size) return true;                     // no key data in the profile → can't filter, don't drop
   return set.has(cam);
 }
 
